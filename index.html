@@ -6,6 +6,7 @@
     <title>Корпоративный Документооборот</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
+        * { box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             padding: 20px;
@@ -21,11 +22,10 @@
             padding: 24px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
         }
-        h1 {
+        h1, h2 {
             text-align: center;
             color: #5682a3;
-            margin-bottom: 30px;
-            font-size: 24px;
+            margin-bottom: 20px;
         }
         .button {
             display: block;
@@ -39,9 +39,7 @@
             cursor: pointer;
             transition: opacity 0.2s;
         }
-        .button:hover {
-            opacity: 0.95;
-        }
+        .button:hover { opacity: 0.95; }
         .button-primary {
             background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
             color: white;
@@ -54,23 +52,77 @@
             background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
             color: white;
         }
-        .status {
+        .button-success {
+            background: linear-gradient(135deg, #66BB6A 0%, #43A047 100%);
+            color: white;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-family: inherit;
+        }
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #5682a3;
+        }
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        .hidden { display: none; }
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+        }
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .loading {
             text-align: center;
-            margin-top: 20px;
-            padding: 16px;
-            border-radius: 12px;
-            background-color: #e8f5e9;
-            color: #2e7d32;
-            font-weight: 500;
+            padding: 40px;
+            font-size: 18px;
+            color: #666;
+        }
+        .file-upload {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+        }
+        .file-upload:hover {
+            border-color: #5682a3;
+            background: #f8f9fa;
         }
         #loading {
             text-align: center;
             padding: 40px;
             font-size: 18px;
             color: #666;
-        }
-        .hidden {
-            display: none;
         }
     </style>
 </head>
@@ -86,56 +138,320 @@
             <button class="button button-secondary" onclick="showScreen('my-tasks')">📋 Мои активные задачи</button>
         </div>
         
+        <!-- Форма создания согласования -->
         <div id="approval" class="hidden">
             <h2>Создать согласование</h2>
-            <button class="button button-danger" onclick="showScreen('main')">← Назад</button>
+            <div id="approval-message"></div>
+            
+            <form id="approval-form" onsubmit="createApproval(event)">
+                <div class="form-group">
+                    <label for="title">Название документа *</label>
+                    <input type="text" id="title" name="title" required placeholder="Например: Счёт на оплату">
+                </div>
+                
+                <div class="form-group">
+                    <label for="description">Описание *</label>
+                    <textarea id="description" name="description" required placeholder="Опишите, что нужно согласовать"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="amount">Сумма (₽)</label>
+                    <input type="number" id="amount" name="amount" placeholder="0.00" step="0.01" min="0">
+                </div>
+                
+                <div class="form-group">
+                    <label for="approver">Согласующий *</label>
+                    <select id="approver" name="approver_id" required>
+                        <option value="">Выберите согласующего</option>
+                        <option value="1">Директор</option>
+                        <option value="2">Бухгалтер</option>
+                        <option value="3">Менеджер</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Прикрепить файл</label>
+                    <div class="file-upload" onclick="document.getElementById('file').click()">
+                        📎 Нажмите для загрузки файла
+                        <input type="file" id="file" name="file" style="display:none" onchange="updateFileName(this)">
+                    </div>
+                    <div id="file-name" style="margin-top: 8px; color: #666; font-size: 14px;"></div>
+                </div>
+                
+                <button type="submit" class="button button-success">
+                    ✅ Отправить на согласование
+                </button>
+                <button type="button" class="button button-danger" onclick="showScreen('main')">
+                    ← Назад
+                </button>
+            </form>
         </div>
         
+        <!-- Форма создания поручения -->
         <div id="task" class="hidden">
             <h2>Создать поручение</h2>
-            <button class="button button-danger" onclick="showScreen('main')">← Назад</button>
+            <div id="task-message"></div>
+            
+            <form id="task-form" onsubmit="createTask(event)">
+                <div class="form-group">
+                    <label for="task-title">Название задачи *</label>
+                    <input type="text" id="task-title" name="title" required placeholder="Например: Подготовить отчёт">
+                </div>
+                
+                <div class="form-group">
+                    <label for="task-description">Описание *</label>
+                    <textarea id="task-description" name="description" required placeholder="Опишите, что нужно сделать"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="task-executor">Исполнитель *</label>
+                    <select id="task-executor" name="executor_id" required>
+                        <option value="">Выберите исполнителя</option>
+                        <option value="1">Иванов И.И.</option>
+                        <option value="2">Петров П.П.</option>
+                        <option value="3">Сидорова С.С.</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="task-deadline">Срок выполнения *</label>
+                    <input type="date" id="task-deadline" name="deadline" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="task-priority">Приоритет</label>
+                    <select id="task-priority" name="priority">
+                        <option value="low">Низкий</option>
+                        <option value="medium" selected>Средний</option>
+                        <option value="high">Высокий</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="button button-success">
+                    ✅ Создать поручение
+                </button>
+                <button type="button" class="button button-danger" onclick="showScreen('main')">
+                    ← Назад
+                </button>
+            </form>
         </div>
         
+        <!-- Мои задачи -->
         <div id="my-tasks" class="hidden">
             <h2>Мои активные задачи</h2>
-            <div id="tasks-list">Загрузка задач...</div>
-            <button class="button button-danger" onclick="showScreen('main')">← Назад</button>
+            <div id="tasks-list">
+                <div class="loading">Загрузка задач...</div>
+            </div>
+            <button class="button button-danger" onclick="showScreen('main')">
+                ← Назад
+            </button>
         </div>
     </div>
 
     <script>
-        // Инициализация Telegram WebApp
         const tg = window.Telegram.WebApp;
         tg.expand();
         tg.ready();
 
-        // Отладка: выводим данные пользователя в консоль
-        console.log('InitData:', tg.initData);
-        console.log('User:', tg.initDataUnsafe?.user);
+        const BACKEND_URL = 'https://dress-quarterly-router-develops.trycloudflare.com';
 
-        // Функция переключения экранов
         function showScreen(screenId) {
-            document.getElementById('loading').classList.add('hidden');
-            document.getElementById('main').classList.add('hidden');
-            document.getElementById('approval').classList.add('hidden');
-            document.getElementById('task').classList.add('hidden');
-            document.getElementById('my-tasks').classList.add('hidden');
-            
+            ['loading','main','approval','task','my-tasks'].forEach(id => {
+                document.getElementById(id).classList.add('hidden');
+            });
             if (screenId) {
                 document.getElementById(screenId).classList.remove('hidden');
-                // Загружаем задачи при открытии экрана
                 if (screenId === 'my-tasks') {
                     loadMyTasks();
                 }
             }
         }
 
-        // Загрузка данных пользователя
+        function updateFileName(input) {
+            const fileName = input.files[0]?.name || '';
+            document.getElementById('file-name').textContent = fileName;
+        }
+
+        async function createApproval(event) {
+            event.preventDefault();
+            
+            const formData = new FormData(event.target);
+            const data = {
+                title: formData.get('title'),
+                description: formData.get('description'),
+                amount: parseFloat(formData.get('amount')) || 0,
+                approver_id: parseInt(formData.get('approver_id')),
+                creator_id: tg.initDataUnsafe?.user?.id || 1
+            };
+
+            try {
+                const response = await fetch(BACKEND_URL + '/api/approvals', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    document.getElementById('approval-message').innerHTML = `
+                        <div class="alert alert-success">
+                            ✅ Согласование успешно создано!<br>
+                            ID: ${result.approval.id}
+                        </div>
+                    `;
+                    event.target.reset();
+                    document.getElementById('file-name').textContent = '';
+                    setTimeout(() => {
+                        showScreen('main');
+                        document.getElementById('approval-message').innerHTML = '';
+                    }, 2000);
+                } else {
+                    document.getElementById('approval-message').innerHTML = `
+                        <div class="alert alert-error">
+                            ❌ Ошибка: ${result.error || 'Неизвестная ошибка'}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('approval-message').innerHTML = `
+                    <div class="alert alert-error">
+                        ❌ Ошибка подключения: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function createTask(event) {
+            event.preventDefault();
+            
+            const formData = new FormData(event.target);
+            const data = {
+                title: formData.get('title'),
+                description: formData.get('description'),
+                executor_id: parseInt(formData.get('executor_id')),
+                deadline: formData.get('deadline'),
+                priority: formData.get('priority'),
+                creator_id: tg.initDataUnsafe?.user?.id || 1
+            };
+
+            try {
+                const response = await fetch(BACKEND_URL + '/api/tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    document.getElementById('task-message').innerHTML = `
+                        <div class="alert alert-success">
+                            ✅ Поручение успешно создано!<br>
+                            ID: ${result.task.id}
+                        </div>
+                    `;
+                    event.target.reset();
+                    setTimeout(() => {
+                        showScreen('main');
+                        document.getElementById('task-message').innerHTML = '';
+                    }, 2000);
+                } else {
+                    document.getElementById('task-message').innerHTML = `
+                        <div class="alert alert-error">
+                            ❌ Ошибка: ${result.error || 'Неизвестная ошибка'}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('task-message').innerHTML = `
+                    <div class="alert alert-error">
+                        ❌ Ошибка подключения: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        async function loadMyTasks() {
+            try {
+                const response = await fetch(BACKEND_URL + '/api/tasks/my', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-user-id': tg.initDataUnsafe?.user?.id?.toString() || '1'
+                    }
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    if (result.tasks.length === 0) {
+                        document.getElementById('tasks-list').innerHTML = `
+                            <div style="text-align: center; padding: 40px; color: #999;">
+                                📭 У вас нет активных задач
+                            </div>
+                        `;
+                    } else {
+                        const tasksHtml = result.tasks.map(task => `
+                            <div style="padding: 16px; background: #f8f9fa; border-radius: 8px; margin: 12px 0; border-left: 4px solid ${getPriorityColor(task.priority)}">
+                                <div style="font-weight: 600; font-size: 16px;">${task.title}</div>
+                                <div style="color: #666; font-size: 14px; margin: 8px 0;">${task.description}</div>
+                                <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 14px;">
+                                    <span style="color: #666;">📅 ${formatDate(task.deadline)}</span>
+                                    <span style="color: ${getPriorityColor(task.priority)}; font-weight: 600;">
+                                        ${getPriorityText(task.priority)}
+                                    </span>
+                                </div>
+                                <div style="margin-top: 8px; font-size: 14px; color: ${getStatusColor(task.status)}">
+                                    📌 ${getStatusText(task.status)}
+                                </div>
+                            </div>
+                        `).join('');
+                        document.getElementById('tasks-list').innerHTML = tasksHtml;
+                    }
+                } else {
+                    document.getElementById('tasks-list').innerHTML = `
+                        <div class="alert alert-error">
+                            ❌ Ошибка загрузки задач: ${result.error}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('tasks-list').innerHTML = `
+                    <div class="alert alert-error">
+                        ❌ Ошибка подключения: ${error.message}
+                    </div>
+                `;
+            }
+        }
+
+        function getPriorityColor(priority) {
+            const colors = { low: '#4CAF50', medium: '#FF9800', high: '#f44336' };
+            return colors[priority] || '#999';
+        }
+
+        function getPriorityText(priority) {
+            const texts = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
+            return texts[priority] || priority;
+        }
+
+        function getStatusColor(status) {
+            const colors = { pending: '#FF9800', in_progress: '#2196F3', completed: '#4CAF50' };
+            return colors[status] || '#999';
+        }
+
+        function getStatusText(status) {
+            const texts = { pending: 'На согласовании', in_progress: 'В работе', completed: 'Выполнено' };
+            return texts[status] || status;
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            return date.toLocaleDateString('ru-RU');
+        }
+
         async function loadUserData() {
             try {
-                // Используем публичный адрес через ngrok
-                const BACKEND_URL = 'https://dress-quarterly-router-develops.trycloudflare.com';
-                
                 const response = await fetch(BACKEND_URL + '/api/user', {
                     method: 'GET',
                     headers: {
@@ -145,73 +461,38 @@
                 });
 
                 const data = await response.json();
-                console.log('API response:', data);
 
                 if (response.ok && data.success) {
                     document.getElementById('loading').innerHTML = `Добро пожаловать, ${data.user.first_name}!`;
-                    setTimeout(() => {
-                        showScreen('main');
-                    }, 1000);
+                    setTimeout(() => showScreen('main'), 1000);
                 } else {
                     document.getElementById('loading').innerHTML = `
                         <div style="color: #d32f2f; text-align: center;">
                             ❌ Ошибка аутентификации<br>
-                            <small>Детали: ${data.error || 'Неизвестная ошибка'}</small>
-                        </div>
-                    `;
-                    console.error('Auth failed:', data);
+                            <small>${data.error || 'Неизвестная ошибка'}</small>
+                        </div>`;
                 }
             } catch (error) {
-                console.error('Fetch error:', error);
                 document.getElementById('loading').innerHTML = `
                     <div style="color: #d32f2f; text-align: center;">
                         ❌ Ошибка подключения к серверу<br>
-                        <small>${error.message}</small><br><br>
-                        <div style="background: #fff3cd; padding: 12px; border-radius: 8px; font-size: 14px;">
-                            Убедитесь, что бэкенд запущен
-                        </div>
-                    </div>
-                `;
+                        <small>${error.message}</small>
+                    </div>`;
             }
         }
 
-        // Загрузка задач (заглушка)
-        function loadMyTasks() {
-            document.getElementById('tasks-list').innerHTML = `
-                <div style="padding: 16px; background: #f8f9fa; border-radius: 8px; margin: 12px 0;">
-                    <div style="font-weight: 600;">Счёт от ООО "Поставщик"</div>
-                    <div style="color: #666; font-size: 14px;">Срок: завтра</div>
-                    <div style="color: #1976d2; font-size: 14px; margin-top: 4px;">На согласовании</div>
-                </div>
-                <div style="padding: 16px; background: #f8f9fa; border-radius: 8px; margin: 12px 0;">
-                    <div style="font-weight: 600;">Поручение: подготовить отчёт</div>
-                    <div style="color: #666; font-size: 14px;">Срок: через 3 дня</div>
-                    <div style="color: #f57c00; font-size: 14px; margin-top: 4px;">В работе</div>
-                </div>
-            `;
-        }
-
-        // Запуск приложения
         window.onload = () => {
-            // Если нет initData (открыт в браузере, а не в Telegram)
             if (!tg.initData && !tg.initDataUnsafe?.user) {
                 document.getElementById('loading').innerHTML = `
                     <div style="text-align: center;">
                         <div style="font-size: 24px; margin-bottom: 16px;">⚠️</div>
                         <div style="font-weight: 600; margin-bottom: 8px;">Это приложение работает только внутри Telegram</div>
-                        <div style="color: #666; margin-bottom: 20px;">
-                            Откройте по ссылке:<br>
-                            <code>t.me/Corp_docs_bot/corp_docs</code>
-                        </div>
                         <button class="button button-secondary" onclick="window.open('https://t.me/Corp_docs_bot/corp_docs', '_blank')">
                             Открыть в Telegram
                         </button>
-                    </div>
-                `;
+                    </div>`;
                 return;
             }
-            
-            // Загружаем данные пользователя
             loadUserData();
         };
     </script>
