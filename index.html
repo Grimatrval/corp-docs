@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Корпоративный Документооборот</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            background-color: #f5f5f5;
+            color: #333;
+            margin: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        h1 {
+            text-align: center;
+            color: #5682a3;
+            margin-bottom: 30px;
+            font-size: 24px;
+        }
+        .button {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            margin: 12px 0;
+            font-size: 18px;
+            font-weight: 600;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .button:hover {
+            opacity: 0.95;
+        }
+        .button-primary {
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            color: white;
+        }
+        .button-secondary {
+            background: linear-gradient(135deg, #2196F3 0%, #1976d2 100%);
+            color: white;
+        }
+        .button-danger {
+            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+            color: white;
+        }
+        .status {
+            text-align: center;
+            margin-top: 20px;
+            padding: 16px;
+            border-radius: 12px;
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            font-weight: 500;
+        }
+        #loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 18px;
+            color: #666;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Корпоративный Документооборот</h1>
+        
+        <div id="loading">Загрузка данных пользователя...</div>
+        
+        <div id="main" class="hidden">
+            <button class="button button-primary" onclick="showScreen('approval')">📄 Согласование</button>
+            <button class="button button-secondary" onclick="showScreen('task')">✅ Поручение</button>
+            <button class="button button-secondary" onclick="showScreen('my-tasks')">📋 Мои активные задачи</button>
+        </div>
+        
+        <div id="approval" class="hidden">
+            <h2>Создать согласование</h2>
+            <button class="button button-danger" onclick="showScreen('main')">← Назад</button>
+        </div>
+        
+        <div id="task" class="hidden">
+            <h2>Создать поручение</h2>
+            <button class="button button-danger" onclick="showScreen('main')">← Назад</button>
+        </div>
+        
+        <div id="my-tasks" class="hidden">
+            <h2>Мои активные задачи</h2>
+            <div id="tasks-list">Загрузка задач...</div>
+            <button class="button button-danger" onclick="showScreen('main')">← Назад</button>
+        </div>
+    </div>
+
+    <script>
+        // Инициализация Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.ready();
+
+        // Отладка: выводим данные пользователя в консоль
+        console.log('InitData:', tg.initData);
+        console.log('User:', tg.initDataUnsafe?.user);
+
+        // Функция переключения экранов
+        function showScreen(screenId) {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('main').classList.add('hidden');
+            document.getElementById('approval').classList.add('hidden');
+            document.getElementById('task').classList.add('hidden');
+            document.getElementById('my-tasks').classList.add('hidden');
+            
+            if (screenId) {
+                document.getElementById(screenId).classList.remove('hidden');
+                // Загружаем задачи при открытии экрана
+                if (screenId === 'my-tasks') {
+                    loadMyTasks();
+                }
+            }
+        }
+
+        // Загрузка данных пользователя
+        async function loadUserData() {
+            try {
+                // ⚠️ ВРЕМЕННО: используем публичный адрес через ngrok
+                // После настройки ngrok замените на ваш адрес вида: https://xyz456.ngrok.io
+                const BACKEND_URL = 'http://localhost:3000'; // ← ЗАМЕНИТЬ НА NGROK ПОСЛЕ НАСТРОЙКИ
+                
+                const response = await fetch(BACKEND_URL + '/api/user', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-init-data': tg.initData || ''
+                    }
+                });
+
+                const data = await response.json();
+                console.log('API response:', data);
+
+                if (response.ok && data.success) {
+                    document.getElementById('loading').innerHTML = `Добро пожаловать, ${data.user.first_name}!`;
+                    setTimeout(() => {
+                        showScreen('main');
+                    }, 1000);
+                } else {
+                    document.getElementById('loading').innerHTML = `
+                        <div style="color: #d32f2f; text-align: center;">
+                            ❌ Ошибка аутентификации<br>
+                            <small>Детали: ${data.error || 'Неизвестная ошибка'}</small>
+                        </div>
+                    `;
+                    console.error('Auth failed:', data);
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                document.getElementById('loading').innerHTML = `
+                    <div style="color: #d32f2f; text-align: center;">
+                        ❌ Ошибка подключения к серверу<br>
+                        <small>${error.message}</small><br><br>
+                        <div style="background: #fff3cd; padding: 12px; border-radius: 8px; font-size: 14px;">
+                            Убедитесь, что бэкенд запущен
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Загрузка задач (заглушка)
+        function loadMyTasks() {
+            document.getElementById('tasks-list').innerHTML = `
+                <div style="padding: 16px; background: #f8f9fa; border-radius: 8px; margin: 12px 0;">
+                    <div style="font-weight: 600;">Счёт от ООО "Поставщик"</div>
+                    <div style="color: #666; font-size: 14px;">Срок: завтра</div>
+                    <div style="color: #1976d2; font-size: 14px; margin-top: 4px;">На согласовании</div>
+                </div>
+                <div style="padding: 16px; background: #f8f9fa; border-radius: 8px; margin: 12px 0;">
+                    <div style="font-weight: 600;">Поручение: подготовить отчёт</div>
+                    <div style="color: #666; font-size: 14px;">Срок: через 3 дня</div>
+                    <div style="color: #f57c00; font-size: 14px; margin-top: 4px;">В работе</div>
+                </div>
+            `;
+        }
+
+        // Запуск приложения
+        window.onload = () => {
+            // Если нет initData (открыт в браузере, а не в Telegram)
+            if (!tg.initData && !tg.initDataUnsafe?.user) {
+                document.getElementById('loading').innerHTML = `
+                    <div style="text-align: center;">
+                        <div style="font-size: 24px; margin-bottom: 16px;">⚠️</div>
+                        <div style="font-weight: 600; margin-bottom: 8px;">Это приложение работает только внутри Telegram</div>
+                        <div style="color: #666; margin-bottom: 20px;">
+                            Откройте по ссылке:<br>
+                            <code>t.me/Corp_docs_bot/corp_docs</code>
+                        </div>
+                        <button class="button button-secondary" onclick="window.open('https://t.me/Corp_docs_bot/corp_docs', '_blank')">
+                            Открыть в Telegram
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Загружаем данные пользователя
+            loadUserData();
+        };
+    </script>
+</body>
+</html>
