@@ -1,500 +1,256 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Корпоративный Документооборот</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            padding: 20px;
-            background-color: #f5f5f5;
-            color: #333;
-            margin: 0;
-        }
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 16px;
-            padding: 24px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        }
-        h1, h2 {
-            text-align: center;
-            color: #5682a3;
-            margin-bottom: 20px;
-        }
-        .button {
-            display: block;
-            width: 100%;
-            padding: 16px;
-            margin: 12px 0;
-            font-size: 18px;
-            font-weight: 600;
-            border: none;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }
-        .button:hover { opacity: 0.95; }
-        .button-primary {
-            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-            color: white;
-        }
-        .button-secondary {
-            background: linear-gradient(135deg, #2196F3 0%, #1976d2 100%);
-            color: white;
-        }
-        .button-danger {
-            background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
-            color: white;
-        }
-        .button-success {
-            background: linear-gradient(135deg, #66BB6A 0%, #43A047 100%);
-            color: white;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #555;
-        }
-        .form-group input,
-        .form-group textarea,
-        .form-group select {
-            width: 100%;
-            padding: 12px;
-            font-size: 16px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            font-family: inherit;
-        }
-        .form-group input:focus,
-        .form-group textarea:focus,
-        .form-group select:focus {
-            outline: none;
-            border-color: #5682a3;
-        }
-        .form-group textarea {
-            min-height: 100px;
-            resize: vertical;
-        }
-        .hidden { display: none; }
-        .alert {
-            padding: 12px 16px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-        }
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .loading {
-            text-align: center;
-            padding: 40px;
-            font-size: 18px;
-            color: #666;
-        }
-        .file-upload {
-            border: 2px dashed #ddd;
-            border-radius: 8px;
-            padding: 20px;
-            text-align: center;
-            cursor: pointer;
-        }
-        .file-upload:hover {
-            border-color: #5682a3;
-            background: #f8f9fa;
-        }
-        #loading {
-            text-align: center;
-            padding: 40px;
-            font-size: 18px;
-            color: #666;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Корпоративный Документооборот</h1>
-        
-        <div id="loading">Загрузка данных пользователя...</div>
-        
-        <div id="main" class="hidden">
-            <button class="button button-primary" onclick="showScreen('approval')">📄 Согласование</button>
-            <button class="button button-secondary" onclick="showScreen('task')">✅ Поручение</button>
-            <button class="button button-secondary" onclick="showScreen('my-tasks')">📋 Мои активные задачи</button>
-        </div>
-        
-        <!-- Форма создания согласования -->
-        <div id="approval" class="hidden">
-            <h2>Создать согласование</h2>
-            <div id="approval-message"></div>
-            
-            <form id="approval-form" onsubmit="createApproval(event)">
-                <div class="form-group">
-                    <label for="title">Название документа *</label>
-                    <input type="text" id="title" name="title" required placeholder="Например: Счёт на оплату">
-                </div>
-                
-                <div class="form-group">
-                    <label for="description">Описание *</label>
-                    <textarea id="description" name="description" required placeholder="Опишите, что нужно согласовать"></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="amount">Сумма (₽)</label>
-                    <input type="number" id="amount" name="amount" placeholder="0.00" step="0.01" min="0">
-                </div>
-                
-                <div class="form-group">
-                    <label for="approver">Согласующий *</label>
-                    <select id="approver" name="approver_id" required>
-                        <option value="">Выберите согласующего</option>
-                        <option value="1">Директор</option>
-                        <option value="2">Бухгалтер</option>
-                        <option value="3">Менеджер</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label>Прикрепить файл</label>
-                    <div class="file-upload" onclick="document.getElementById('file').click()">
-                        📎 Нажмите для загрузки файла
-                        <input type="file" id="file" name="file" style="display:none" onchange="updateFileName(this)">
-                    </div>
-                    <div id="file-name" style="margin-top: 8px; color: #666; font-size: 14px;"></div>
-                </div>
-                
-                <button type="submit" class="button button-success">
-                    ✅ Отправить на согласование
-                </button>
-                <button type="button" class="button button-danger" onclick="showScreen('main')">
-                    ← Назад
-                </button>
-            </form>
-        </div>
-        
-        <!-- Форма создания поручения -->
-        <div id="task" class="hidden">
-            <h2>Создать поручение</h2>
-            <div id="task-message"></div>
-            
-            <form id="task-form" onsubmit="createTask(event)">
-                <div class="form-group">
-                    <label for="task-title">Название задачи *</label>
-                    <input type="text" id="task-title" name="title" required placeholder="Например: Подготовить отчёт">
-                </div>
-                
-                <div class="form-group">
-                    <label for="task-description">Описание *</label>
-                    <textarea id="task-description" name="description" required placeholder="Опишите, что нужно сделать"></textarea>
-                </div>
-                
-                <div class="form-group">
-                    <label for="task-executor">Исполнитель *</label>
-                    <select id="task-executor" name="executor_id" required>
-                        <option value="">Выберите исполнителя</option>
-                        <option value="1">Иванов И.И.</option>
-                        <option value="2">Петров П.П.</option>
-                        <option value="3">Сидорова С.С.</option>
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="task-deadline">Срок выполнения *</label>
-                    <input type="date" id="task-deadline" name="deadline" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="task-priority">Приоритет</label>
-                    <select id="task-priority" name="priority">
-                        <option value="low">Низкий</option>
-                        <option value="medium" selected>Средний</option>
-                        <option value="high">Высокий</option>
-                    </select>
-                </div>
-                
-                <button type="submit" class="button button-success">
-                    ✅ Создать поручение
-                </button>
-                <button type="button" class="button button-danger" onclick="showScreen('main')">
-                    ← Назад
-                </button>
-            </form>
-        </div>
-        
-        <!-- Мои задачи -->
-        <div id="my-tasks" class="hidden">
-            <h2>Мои активные задачи</h2>
-            <div id="tasks-list">
-                <div class="loading">Загрузка задач...</div>
-            </div>
-            <button class="button button-danger" onclick="showScreen('main')">
-                ← Назад
-            </button>
-        </div>
-    </div>
+require('dotenv').config();
+const { Telegraf, Markup } = require('telegraf');
+const { Pool } = require('pg');
 
-    <script>
-        const tg = window.Telegram.WebApp;
-        tg.expand();
-        tg.ready();
+const bot = new Telegraf(process.env.BOT_TOKEN);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const userStates = {};
 
-        const BACKEND_URL = 'https://dress-quarterly-router-develops.trycloudflare.com';
+// ========== КОМАНДЫ ==========
 
-        function showScreen(screenId) {
-            ['loading','main','approval','task','my-tasks'].forEach(id => {
-                document.getElementById(id).classList.add('hidden');
-            });
-            if (screenId) {
-                document.getElementById(screenId).classList.remove('hidden');
-                if (screenId === 'my-tasks') {
-                    loadMyTasks();
-                }
-            }
-        }
+bot.start(async (ctx) => {
+  const userId = ctx.from.id.toString();
+  let user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [userId]);
+  
+  if (user.rows.length === 0) {
+    await pool.query('INSERT INTO users (telegram_id, username, first_name) VALUES ($1, $2, $3)', [userId, ctx.from.username, ctx.from.first_name]);
+  }
+  
+  ctx.reply(`👋 *Добро пожаловать, ${ctx.from.first_name}!*\n\n📋 *Корпоративный Документооборот*\n\n*Команды:*\n/newapproval — Создать согласование\n/newtask — Создать поручение\n/mytasks — Мои задачи\n/myerrands — Мои поручения\n/myapprovals — Мои согласования\n/help — Помощь\n\n*Админ:*\n/register — Добавить пользователя\n/unregister — Удалить пользователя\n/listusers — Список\n\n*Или отправьте файл* с текстом "Согласование: ..."\n\nВы: @${ctx.from.username || 'нет'}\nID: ${ctx.from.id}`, { parse_mode: 'Markdown' });
+});
 
-        function updateFileName(input) {
-            const fileName = input.files[0]?.name || '';
-            document.getElementById('file-name').textContent = fileName;
-        }
+bot.help((ctx) => {
+  ctx.reply(`📖 *Помощь*\n\n*Создание:*\n/newapproval — согласование\n/newtask — поручение\n\n*Просмотр:*\n/mytasks — мои задачи\n/myerrands — созданные мной поручения\n/myapprovals — мои согласования\n\n*Файлы:*\nОтправьте файл с текстом "Согласование: название"`, { parse_mode: 'Markdown' });
+});
 
-        async function createApproval(event) {
-            event.preventDefault();
-            
-            const formData = new FormData(event.target);
-            const data = {
-                title: formData.get('title'),
-                description: formData.get('description'),
-                amount: parseFloat(formData.get('amount')) || 0,
-                approver_id: parseInt(formData.get('approver_id')),
-                creator_id: tg.initDataUnsafe?.user?.id || 1
-            };
+// ========== АДМИН КОМАНДЫ ==========
 
-            try {
-                const response = await fetch(BACKEND_URL + '/api/approvals', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
+bot.command('register', async (ctx) => {
+  const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [ctx.from.id.toString()]);
+  if (user.rows.length === 0 || user.rows[0].role !== 'admin') return ctx.reply('❌ Только админ');
+  
+  userStates[ctx.from.id] = { step: 'reg_user' };
+  ctx.reply('👤 Введите @username:', { reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime() });
+});
 
-                const result = await response.json();
+bot.command('unregister', async (ctx) => {
+  const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [ctx.from.id.toString()]);
+  if (user.rows.length === 0 || user.rows[0].role !== 'admin') return ctx.reply('❌ Только админ');
+  
+  userStates[ctx.from.id] = { step: 'unreg_user' };
+  ctx.reply('👤 Введите @username для удаления:', { reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime() });
+});
 
-                if (response.ok && result.success) {
-                    document.getElementById('approval-message').innerHTML = `
-                        <div class="alert alert-success">
-                            ✅ Согласование успешно создано!<br>
-                            ID: ${result.approval.id}
-                        </div>
-                    `;
-                    event.target.reset();
-                    document.getElementById('file-name').textContent = '';
-                    setTimeout(() => {
-                        showScreen('main');
-                        document.getElementById('approval-message').innerHTML = '';
-                    }, 2000);
-                } else {
-                    document.getElementById('approval-message').innerHTML = `
-                        <div class="alert alert-error">
-                            ❌ Ошибка: ${result.error || 'Неизвестная ошибка'}
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                document.getElementById('approval-message').innerHTML = `
-                    <div class="alert alert-error">
-                        ❌ Ошибка подключения: ${error.message}
-                    </div>
-                `;
-            }
-        }
+bot.command('listusers', async (ctx) => {
+  const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [ctx.from.id.toString()]);
+  if (user.rows.length === 0 || user.rows[0].role !== 'admin') return ctx.reply('❌ Только админ');
+  
+  const result = await pool.query('SELECT username, role, is_active FROM users ORDER BY username');
+  let msg = '👥 *Пользователи:*\n\n';
+  result.rows.forEach((u, i) => {
+    msg += `${i+1}. ${u.is_active ? '✅' : '❌'} @${u.username || 'нет'} — ${u.role}\n`;
+  });
+  ctx.reply(msg, { parse_mode: 'Markdown' });
+});
 
-        async function createTask(event) {
-            event.preventDefault();
-            
-            const formData = new FormData(event.target);
-            const data = {
-                title: formData.get('title'),
-                description: formData.get('description'),
-                executor_id: parseInt(formData.get('executor_id')),
-                deadline: formData.get('deadline'),
-                priority: formData.get('priority'),
-                creator_id: tg.initDataUnsafe?.user?.id || 1
-            };
+// ========== СОГЛАСОВАНИЯ ==========
 
-            try {
-                const response = await fetch(BACKEND_URL + '/api/tasks', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
+bot.command('newapproval', (ctx) => {
+  userStates[ctx.from.id] = { step: 'appr_title' };
+  ctx.reply('📄 Название:', { reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime() });
+});
 
-                const result = await response.json();
+bot.command('myapprovals', async (ctx) => {
+  const user = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [ctx.from.id.toString()]);
+  if (user.rows.length === 0) return ctx.reply('❌ Не найден');
+  
+  const result = await pool.query('SELECT * FROM approvals WHERE creator_id = $1 ORDER BY created_at DESC LIMIT 20', [user.rows[0].id]);
+  if (result.rows.length === 0) return ctx.reply('📭 Нет согласований');
+  
+  let msg = '📋 *Ваши согласования:*\n\n';
+  result.rows.forEach((a, i) => {
+    msg += `${i+1}. *${a.title}* — ${a.amount}₽ | @${a.approver_username || 'н/д'} | ${a.status}\n`;
+  });
+  ctx.reply(msg, { parse_mode: 'Markdown' });
+});
 
-                if (response.ok && result.success) {
-                    document.getElementById('task-message').innerHTML = `
-                        <div class="alert alert-success">
-                            ✅ Поручение успешно создано!<br>
-                            ID: ${result.task.id}
-                        </div>
-                    `;
-                    event.target.reset();
-                    setTimeout(() => {
-                        showScreen('main');
-                        document.getElementById('task-message').innerHTML = '';
-                    }, 2000);
-                } else {
-                    document.getElementById('task-message').innerHTML = `
-                        <div class="alert alert-error">
-                            ❌ Ошибка: ${result.error || 'Неизвестная ошибка'}
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                document.getElementById('task-message').innerHTML = `
-                    <div class="alert alert-error">
-                        ❌ Ошибка подключения: ${error.message}
-                    </div>
-                `;
-            }
-        }
+// ========== ПОРУЧЕНИЯ ==========
 
-        async function loadMyTasks() {
-            try {
-                const response = await fetch(BACKEND_URL + '/api/tasks/my', {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-user-id': tg.initDataUnsafe?.user?.id?.toString() || '1'
-                    }
-                });
+bot.command('newtask', (ctx) => {
+  userStates[ctx.from.id] = { step: 'task_title' };
+  ctx.reply('✅ Название задачи:', { reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime() });
+});
 
-                const result = await response.json();
+bot.command('mytasks', async (ctx) => {
+  const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [ctx.from.id.toString()]);
+  if (user.rows.length === 0) return ctx.reply('❌ Не найден');
+  
+  const result = await pool.query("SELECT * FROM tasks WHERE executor_username = $1 AND status != 'completed' ORDER BY deadline ASC", [user.rows[0].username]);
+  if (result.rows.length === 0) return ctx.reply('📭 Нет задач');
+  
+  let msg = '📋 *Ваши задачи:*\n\n';
+  result.rows.forEach((t, i) => {
+    msg += `${i+1}. *${t.title}*\n📅 ${new Date(t.deadline).toLocaleDateString('ru-RU')} | 🔥 ${t.priority}\n\n`;
+  });
+  ctx.reply(msg, { parse_mode: 'Markdown' });
+});
 
-                if (response.ok && result.success) {
-                    if (result.tasks.length === 0) {
-                        document.getElementById('tasks-list').innerHTML = `
-                            <div style="text-align: center; padding: 40px; color: #999;">
-                                📭 У вас нет активных задач
-                            </div>
-                        `;
-                    } else {
-                        const tasksHtml = result.tasks.map(task => `
-                            <div style="padding: 16px; background: #f8f9fa; border-radius: 8px; margin: 12px 0; border-left: 4px solid ${getPriorityColor(task.priority)}">
-                                <div style="font-weight: 600; font-size: 16px;">${task.title}</div>
-                                <div style="color: #666; font-size: 14px; margin: 8px 0;">${task.description}</div>
-                                <div style="display: flex; justify-content: space-between; margin-top: 12px; font-size: 14px;">
-                                    <span style="color: #666;">📅 ${formatDate(task.deadline)}</span>
-                                    <span style="color: ${getPriorityColor(task.priority)}; font-weight: 600;">
-                                        ${getPriorityText(task.priority)}
-                                    </span>
-                                </div>
-                                <div style="margin-top: 8px; font-size: 14px; color: ${getStatusColor(task.status)}">
-                                    📌 ${getStatusText(task.status)}
-                                </div>
-                            </div>
-                        `).join('');
-                        document.getElementById('tasks-list').innerHTML = tasksHtml;
-                    }
-                } else {
-                    document.getElementById('tasks-list').innerHTML = `
-                        <div class="alert alert-error">
-                            ❌ Ошибка загрузки задач: ${result.error}
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                document.getElementById('tasks-list').innerHTML = `
-                    <div class="alert alert-error">
-                        ❌ Ошибка подключения: ${error.message}
-                    </div>
-                `;
-            }
-        }
+bot.command('myerrands', async (ctx) => {
+  const user = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [ctx.from.id.toString()]);
+  if (user.rows.length === 0) return ctx.reply('❌ Не найден');
+  
+  const result = await pool.query('SELECT * FROM tasks WHERE creator_id = $1 ORDER BY created_at DESC LIMIT 20', [user.rows[0].id]);
+  if (result.rows.length === 0) return ctx.reply('📭 Нет поручений');
+  
+  let msg = '📝 *Ваши поручения:*\n\n';
+  result.rows.forEach((t, i) => {
+    msg += `${i+1}. *${t.title}*\n👤 @${t.executor_username} | 📅 ${new Date(t.deadline).toLocaleDateString('ru-RU')}\n\n`;
+  });
+  ctx.reply(msg, { parse_mode: 'Markdown' });
+});
 
-        function getPriorityColor(priority) {
-            const colors = { low: '#4CAF50', medium: '#FF9800', high: '#f44336' };
-            return colors[priority] || '#999';
-        }
+// ========== ОБРАБОТКА ТЕКСТА ==========
 
-        function getPriorityText(priority) {
-            const texts = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
-            return texts[priority] || priority;
-        }
+bot.on('text', async (ctx) => {
+  const text = ctx.message.text;
+  const userId = ctx.from.id;
+  
+  if (text === '❌ Отмена') {
+    delete userStates[userId];
+    return ctx.reply('❌ Отменено', { reply_markup: Markup.removeKeyboard() });
+  }
+  
+  // Авто-создание согласования
+  if (text.toLowerCase().includes('согласование:') || text.toLowerCase().includes('согласуй:')) {
+    const title = text.replace(/согласование:|согласуй:/i, '').trim();
+    const user = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [userId.toString()]);
+    let creatorId;
+    if (user.rows.length === 0) {
+      const newUser = await pool.query('INSERT INTO users (telegram_id, username, first_name) VALUES ($1, $2, $3) RETURNING id', [userId.toString(), ctx.from.username, ctx.from.first_name]);
+      creatorId = newUser.rows[0].id;
+    } else creatorId = user.rows[0].id;
+    
+    const result = await pool.query("INSERT INTO approvals (title, description, creator_id, status) VALUES ($1, $2, $3, 'pending') RETURNING *", [title, 'Авто-создание', creatorId]);
+    return ctx.reply(`✅ Согласование #${result.rows[0].id} создано!\n\n📄 ${title}`);
+  }
+  
+  const state = userStates[userId];
+  
+  // Регистрация
+  if (state?.step === 'reg_user') {
+    const username = text.replace('@', '').trim();
+    userStates[userId] = { ...state, username, step: 'reg_role' };
+    ctx.reply('🔑 Роль (employee/approver/admin):');
+    return;
+  }
+  
+  if (state?.step === 'reg_role') {
+    const currentUser = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [userId.toString()]);
+    if (currentUser.rows.length === 0 || currentUser.rows[0].role !== 'admin') {
+      delete userStates[userId];
+      return ctx.reply('❌ Только админ');
+    }
+    
+    await pool.query('INSERT INTO users (telegram_id, username, role) VALUES ($1, $2, $3) ON CONFLICT (telegram_id) DO UPDATE SET role = $3', [`temp_${state.username}`, state.username, state.role || text]);
+    delete userStates[userId];
+    return ctx.reply(`✅ @${state.username} добавлен!`);
+  }
+  
+  // Удаление
+  if (state?.step === 'unreg_user') {
+    const username = text.replace('@', '').trim();
+    await pool.query("UPDATE users SET is_active = false WHERE username = $1", [username]);
+    delete userStates[userId];
+    return ctx.reply(`✅ @${username} удалён`);
+  }
+  
+  // Согласование
+  if (state?.step === 'appr_title') {
+    userStates[userId] = { ...state, title: text, step: 'appr_amount' };
+    return ctx.reply('💰 Сумма:');
+  }
+  
+  if (state?.step === 'appr_amount') {
+    userStates[userId] = { ...state, amount: parseFloat(text) || 0, step: 'appr_desc' };
+    return ctx.reply('📝 Описание:');
+  }
+  
+  if (state?.step === 'appr_desc') {
+    userStates[userId] = { ...state, description: text, step: 'appr_approver' };
+    return ctx.reply('👤 @username согласующего:');
+  }
+  
+  if (state?.step === 'appr_approver') {
+    const approver = text.replace('@', '').trim();
+    const user = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [userId.toString()]);
+    let creatorId;
+    if (user.rows.length === 0) {
+      const newUser = await pool.query('INSERT INTO users (telegram_id, username, first_name) VALUES ($1, $2, $3) RETURNING id', [userId.toString(), ctx.from.username, ctx.from.first_name]);
+      creatorId = newUser.rows[0].id;
+    } else creatorId = user.rows[0].id;
+    
+    const result = await pool.query("INSERT INTO approvals (title, description, amount, creator_id, approver_username, status) VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING *", [state.title, state.description, state.amount, creatorId, approver]);
+    
+    delete userStates[userId];
+    ctx.reply(`✅ Согласование #${result.rows[0].id} создано!\n\n📄 ${state.title}\n💰 ${state.amount}₽\n👤 @${approver}`);
+    
+    // Уведомление
+    const approverUser = await pool.query('SELECT telegram_id FROM users WHERE username = $1', [approver]);
+    if (approverUser.rows.length > 0) {
+      await bot.telegram.sendMessage(approverUser.rows[0].telegram_id, `🔔 Новое согласование #${result.rows[0].id}\n\n📄 ${state.title}\n💰 ${state.amount}₽\n\nОт: @${ctx.from.username || ctx.from.first_name}`);
+    }
+    return;
+  }
+  
+  // Поручение
+  if (state?.step === 'task_title') {
+    userStates[userId] = { ...state, title: text, step: 'task_desc' };
+    return ctx.reply('📝 Описание:');
+  }
+  
+  if (state?.step === 'task_desc') {
+    userStates[userId] = { ...state, description: text, step: 'task_exec' };
+    return ctx.reply('👤 @username исполнителя:');
+  }
+  
+  if (state?.step === 'task_exec') {
+    userStates[userId] = { ...state, executor: text.replace('@', '').trim(), step: 'task_deadline' };
+    return ctx.reply('📅 Срок (ДД.ММ.ГГГГ):');
+  }
+  
+  if (state?.step === 'task_deadline') {
+    userStates[userId] = { ...state, deadline: text, step: 'task_priority' };
+    ctx.reply('🔥 Приоритет:', { reply_markup: Markup.keyboard([['Низкий'], ['Средний'], ['Высокий'], ['❌ Отмена']]).resize().oneTime() });
+    return;
+  }
+  
+  if (state?.step === 'task_priority') {
+    const priority = { 'Низкий': 'low', 'Средний': 'medium', 'Высокий': 'high' }[text] || 'medium';
+    const user = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [userId.toString()]);
+    let creatorId;
+    if (user.rows.length === 0) {
+      const newUser = await pool.query('INSERT INTO users (telegram_id, username, first_name) VALUES ($1, $2, $3) RETURNING id', [userId.toString(), ctx.from.username, ctx.from.first_name]);
+      creatorId = newUser.rows[0].id;
+    } else creatorId = user.rows[0].id;
+    
+    const parts = state.deadline.split('.');
+    const deadline = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    
+    const result = await pool.query("INSERT INTO tasks (title, description, creator_id, executor_username, deadline, priority, status) VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING *", [state.title, state.description, creatorId, state.executor, deadline, priority]);
+    
+    delete userStates[userId];
+    ctx.reply(`✅ Поручение #${result.rows[0].id} создано!\n\n📋 ${state.title}\n👤 @${state.executor}\n📅 ${state.deadline}\n🔥 ${text}`);
+    
+    // Уведомление
+    const execUser = await pool.query('SELECT telegram_id FROM users WHERE username = $1', [state.executor]);
+    if (execUser.rows.length > 0) {
+      await bot.telegram.sendMessage(execUser.rows[0].telegram_id, `🔔 Новое поручение #${result.rows[0].id}\n\n📋 ${state.title}\n📝 ${state.description}\n📅 ${state.deadline}\n\nОт: @${ctx.from.username || ctx.from.first_name}`);
+    }
+  }
+});
 
-        function getStatusColor(status) {
-            const colors = { pending: '#FF9800', in_progress: '#2196F3', completed: '#4CAF50' };
-            return colors[status] || '#999';
-        }
+// ========== ЗАПУСК ==========
 
-        function getStatusText(status) {
-            const texts = { pending: 'На согласовании', in_progress: 'В работе', completed: 'Выполнено' };
-            return texts[status] || status;
-        }
-
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            return date.toLocaleDateString('ru-RU');
-        }
-
-        async function loadUserData() {
-            try {
-                const response = await fetch(BACKEND_URL + '/api/user', {
-                    method: 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-init-data': tg.initData || ''
-                    }
-                });
-
-                const data = await response.json();
-
-                if (response.ok && data.success) {
-                    document.getElementById('loading').innerHTML = `Добро пожаловать, ${data.user.first_name}!`;
-                    setTimeout(() => showScreen('main'), 1000);
-                } else {
-                    document.getElementById('loading').innerHTML = `
-                        <div style="color: #d32f2f; text-align: center;">
-                            ❌ Ошибка аутентификации<br>
-                            <small>${data.error || 'Неизвестная ошибка'}</small>
-                        </div>`;
-                }
-            } catch (error) {
-                document.getElementById('loading').innerHTML = `
-                    <div style="color: #d32f2f; text-align: center;">
-                        ❌ Ошибка подключения к серверу<br>
-                        <small>${error.message}</small>
-                    </div>`;
-            }
-        }
-
-        window.onload = () => {
-            if (!tg.initData && !tg.initDataUnsafe?.user) {
-                document.getElementById('loading').innerHTML = `
-                    <div style="text-align: center;">
-                        <div style="font-size: 24px; margin-bottom: 16px;">⚠️</div>
-                        <div style="font-weight: 600; margin-bottom: 8px;">Это приложение работает только внутри Telegram</div>
-                        <button class="button button-secondary" onclick="window.open('https://t.me/Corp_docs_bot/corp_docs', '_blank')">
-                            Открыть в Telegram
-                        </button>
-                    </div>`;
-                return;
-            }
-            loadUserData();
-        };
-    </script>
-</body>
-</html>
+bot.launch().then(() => console.log('✅ Бот запущен!'));
+process.on('SIGINT', () => bot.stop());
+process.on('SIGTERM', () => bot.stop());
