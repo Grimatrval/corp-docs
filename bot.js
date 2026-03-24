@@ -28,6 +28,27 @@ async function checkAccess(ctx) {
   }
 }
 
+async function sendNotification(telegramId, message, keyboard = null) {
+  try {
+    if (!telegramId || isNaN(parseInt(telegramId))) {
+      console.log('⚠️ Invalid telegram_id:', telegramId);
+      return false;
+    }
+    
+    await bot.telegram.sendMessage(
+      telegramId.toString(),
+      message,
+      keyboard ? { reply_markup: keyboard } : {}
+    );
+    
+    console.log('✅ Notification sent to:', telegramId);
+    return true;
+  } catch (e) {
+    console.error('❌ sendNotification error:', e.message);
+    return false;
+  }
+}
+
 // ========== АДМИН КОМАНДЫ ==========
 
 bot.command('adduser', async (ctx) => {
@@ -41,45 +62,49 @@ bot.command('adduser', async (ctx) => {
     
     const args = ctx.message.text.split(' ');
     if (args.length < 4) {
-      return ctx.reply('❌ Использование: /adduser @username Имя Фамилия\n\nПример: /adduser @ivanov Иван Иванов');
+      return ctx.reply(
+        '❌ Использование: /adduser <Telegram_ID> Имя Фамилия\n\n' +
+        'Пример: /adduser 123456789 Иван Иванов\n\n' +
+        'Чтобы узнать Telegram ID:\n' +
+        '1. Пользователь пишет @userinfobot\n' +
+        '2. Получает свой ID (число)\n' +
+        '3. Вы добавляете его по этому ID'
+      );
     }
     
-    const username = args[1].replace('@', '');
+    const telegramId = args[1];
     const firstName = args[2];
     const lastName = args[3];
     
-    // Пробуем получить chat_id по username
-    try {
-      const chat = await bot.telegram.getChat('@' + username);
-      const telegramId = chat.id.toString();
-      
-      const result = await pool.query(
-        'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', true) ON CONFLICT (telegram_id) DO UPDATE SET first_name = $2, last_name = $3, username = $4, is_active = true RETURNING *',
-        [telegramId, firstName, lastName, username]
-      );
-      
-      ctx.reply(
-        '✅ Пользователь добавлен:\n\n' +
-        '👤 ' + firstName + ' ' + lastName + '\n' +
-        '@' + username + '\n' +
-        'ID: ' + result.rows[0].id + '\n' +
-        'Telegram ID: ' + telegramId + '\n\n' +
-        'Пользователь может начать работу с ботом.'
-      );
-    } catch (e) {
-      ctx.reply(
-        '⚠️ Пользователь добавлен без Telegram ID\n\n' +
-        '👤 ' + firstName + ' ' + lastName + '\n' +
-        '@' + username + '\n\n' +
-        '❗ Не удалось получить Telegram ID.\n' +
-        'Пользователь должен написать боту /start для активации.'
-      );
-      
-      await pool.query(
-        'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', false) ON CONFLICT (telegram_id) DO UPDATE SET first_name = $2, last_name = $3, username = $4 RETURNING *',
-        [username, firstName, lastName, username]
+    if (!telegramId || !/^\d+$/.test(telegramId)) {
+      return ctx.reply('❌ Telegram ID должен быть числом!\n\nПример: /adduser 123456789 Иван Иванов');
+    }
+    
+    const existing = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [telegramId]);
+    if (existing.rows.length > 0) {
+      return ctx.reply(
+        '⚠️ Пользователь с таким Telegram ID уже существует:\n\n' +
+        '👤 ' + safeString(existing.rows[0].first_name) + ' ' + safeString(existing.rows[0].last_name) + '\n' +
+        '@' + (existing.rows[0].username || 'нет username') + '\n' +
+        'Статус: ' + (existing.rows[0].is_active ? 'активен' : 'неактивен')
       );
     }
+    
+    const result = await pool.query(
+      'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', true) RETURNING *',
+      [telegramId, firstName, lastName, '']
+    );
+    
+    ctx.reply(
+      '✅ Пользователь добавлен и АКТИВИРОВАН:\n\n' +
+      '👤 ' + firstName + ' ' + lastName + '\n' +
+      'Telegram ID: ' + telegramId + '\n' +
+      'ID в системе: ' + result.rows[0].id + '\n\n' +
+      'Пользователь может сразу работать с ботом!'
+    );
+    
+    console.log('✅ User added:', firstName, lastName, 'Telegram ID:', telegramId);
+    
   } catch (e) {
     console.error('adduser error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
@@ -166,18 +191,19 @@ bot.start(async (ctx) => {
       const admins = await pool.query('SELECT telegram_id FROM users WHERE role = \'admin\' AND is_active = true');
       admins.rows.forEach(async admin => {
         try {
-          await bot.telegram.sendMessage(
-            admin.telegram_id,
-            '🔔 Новый пользователь:\n\n' +
-            '👤 ' + safeString(ctx.from.first_name) + '\n' +
-            'ID: ' + telegramId
-          );
+          if (admin.telegram_id && !isNaN(parseInt(admin.telegram_id))) {
+            await bot.telegram.sendMessage(
+              admin.telegram_id,
+              '🔔 Новый пользователь:\n\n' +
+              '👤 ' + safeString(ctx.from.first_name) + '\n' +
+              'ID: ' + telegramId
+            );
+          }
         } catch (e) { /* ignore */ }
       });
       return;
     }
     
-    // Активируем пользователя если был неактивен
     if (!user.rows[0].is_active) {
       await pool.query('UPDATE users SET is_active = true WHERE telegram_id = $1', [telegramId]);
     }
@@ -223,7 +249,7 @@ bot.help(async (ctx) => {
     'Для согласующих:\n' +
     'После согласования можно переслать на оплату\n\n' +
     'Для администратора:\n' +
-    '/adduser @username Имя Фамилия\n' +
+    '/adduser <Telegram_ID> Имя Фамилия\n' +
     '/removeuser @username\n' +
     '/listusers — список всех'
   );
@@ -597,30 +623,6 @@ async function createApprovalFromFile(ctx, caption, fileId, fileName, fileType) 
   }
 }
 
-// ========== ОТПРАВКА УВЕДОМЛЕНИЙ ==========
-
-async function sendNotification(telegramId, message, keyboard = null) {
-  try {
-    // Проверяем что telegramId это число
-    if (!telegramId || isNaN(parseInt(telegramId))) {
-      console.log('⚠️ Invalid telegram_id:', telegramId);
-      return false;
-    }
-    
-    await bot.telegram.sendMessage(
-      telegramId.toString(),
-      message,
-      keyboard ? { reply_markup: keyboard } : {}
-    );
-    
-    console.log('✅ Notification sent to:', telegramId);
-    return true;
-  } catch (e) {
-    console.error('❌ sendNotification error:', e.message);
-    return false;
-  }
-}
-
 // ========== CALLBACK QUERY ==========
 
 bot.action(/^approver_(\d+)/, async (ctx) => {
@@ -650,12 +652,10 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
       reply_markup: Markup.removeKeyboard()
     });
     
-    // Отправляем уведомление согласующему
-    const approver = await pool.query('SELECT telegram_id, first_name, username FROM users WHERE id = $1', [approverId]);
+    const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
     if (approver.rows.length > 0) {
       const telegramId = approver.rows[0].telegram_id;
       
-      // Проверяем что telegram_id это число
       if (telegramId && !isNaN(parseInt(telegramId))) {
         await sendNotification(
           telegramId,
@@ -669,8 +669,6 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
             [Markup.button.callback('❌ Отклонить', 'reject_' + result.rows[0].id)]
           ])
         );
-      } else {
-        console.log('⚠️ Cannot notify approver - invalid telegram_id:', telegramId);
       }
     }
     
