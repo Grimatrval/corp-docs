@@ -1,4 +1,4 @@
-sudo -u postgres psql -d corp_docs_db << 'EOF'
+sudo -u postgres psql -d corp_docs_db << 'ENDSQL'
 -- Таблица users
 CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
@@ -18,12 +18,12 @@ CREATE TABLE IF NOT EXISTS approvals (
   title VARCHAR(255) NOT NULL,
   description TEXT,
   amount DECIMAL(10,2) DEFAULT 0,
-  creator_id INTEGER REFERENCES users(id),
-  approver_id INTEGER REFERENCES users(id),
+  creator_id INTEGER,
+  approver_id INTEGER,
   status VARCHAR(50) DEFAULT 'pending',
   file_id VARCHAR(255),
   file_type VARCHAR(50),
-  payment_sent_to INTEGER REFERENCES users(id),
+  payment_sent_to INTEGER,
   payment_status VARCHAR(50) DEFAULT 'not_required',
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   id SERIAL PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
   description TEXT,
-  creator_id INTEGER REFERENCES users(id),
-  executor_id INTEGER REFERENCES users(id),
+  creator_id INTEGER,
+  executor_id INTEGER,
   deadline DATE,
   priority VARCHAR(50) DEFAULT 'medium',
   status VARCHAR(50) DEFAULT 'pending',
@@ -53,12 +53,12 @@ CREATE INDEX IF NOT EXISTS idx_tasks_executor ON tasks(executor_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
 
--- Уникальность
-ALTER TABLE users ADD CONSTRAINT users_telegram_id_unique UNIQUE (telegram_id);
-
 -- Очистка
 DELETE FROM users a USING users b WHERE a.ctid < b.ctid AND a.telegram_id = b.telegram_id;
 UPDATE users SET last_name = COALESCE(last_name, ''), username = COALESCE(username, '') WHERE last_name IS NULL OR username IS NULL;
 
-SELECT '✅ Миграция завершена!' as status;
-EOF
+SELECT '✅ Готово!' as status;
+ENDSQL
+
+# Перезапуск
+pm2 restart corp-docs-bot
