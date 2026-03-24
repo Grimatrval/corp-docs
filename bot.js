@@ -17,16 +17,10 @@ async function checkAccess(ctx) {
   const telegramId = ctx.from.id.toString();
   try {
     const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1 AND is_active = true', [telegramId]);
-    
     if (user.rows.length === 0) {
-      ctx.reply(
-        '❌ ДОСТУП ЗАПРЕЩЁН\n\n' +
-        'Вы не зарегистрированы в системе.\n\n' +
-        'Обратитесь к администратору для добавления.'
-      );
+      ctx.reply('❌ ДОСТУП ЗАПРЕЩЁН\n\nВы не зарегистрированы в системе.\n\nОбратитесь к администратору.');
       return false;
     }
-    
     return user.rows[0];
   } catch (e) {
     console.error('checkAccess error:', e);
@@ -133,7 +127,6 @@ bot.command('listusers', async (ctx) => {
 bot.start(async (ctx) => {
   try {
     const telegramId = ctx.from.id.toString();
-    
     const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [telegramId]);
     
     if (user.rows.length === 0) {
@@ -146,7 +139,8 @@ bot.start(async (ctx) => {
         '👋 Добро пожаловать, ' + safeString(ctx.from.first_name) + '!\n\n' +
         '⚠️ ВАША РЕГИСТРАЦИЯ НА РАССМОТРЕНИИ\n\n' +
         'Администратор получит уведомление.\n' +
-        'После подтверждения вы получите доступ.'
+        'После подтверждения вы получите доступ.\n\n' +
+        'Команда /help — помощь'
       );
       
       const admins = await pool.query('SELECT telegram_id FROM users WHERE role = \'admin\' AND is_active = true');
@@ -160,12 +154,11 @@ bot.start(async (ctx) => {
           );
         } catch (e) { /* ignore */ }
       });
-      
       return;
     }
     
     if (!user.rows[0].is_active) {
-      return ctx.reply('⏳ Ваша регистрация ещё не активирована.');
+      return ctx.reply('⏳ Ваша регистрация ещё не активирована администратором.');
     }
     
     await pool.query('UPDATE users SET last_seen = NOW() WHERE telegram_id = $1', [telegramId]);
@@ -174,16 +167,16 @@ bot.start(async (ctx) => {
       '👋 Добро пожаловать, ' + safeString(ctx.from.first_name) + '!\n\n' +
       '📋 Корпоративный Документооборот\n\n' +
       'Команды:\n' +
-      '/new_approval — Согласование\n' +
-      '/new_task — Поручение\n' +
+      '/new_approval — Создать согласование\n' +
+      '/new_task — Создать поручение\n' +
       '/my_tasks — Мои задачи\n' +
       '/my_approvals — Мои согласования\n' +
       '/my_errands — Мои поручения\n' +
       '/help — Помощь\n\n' +
       'Админ:\n' +
-      '/adduser — Добавить\n' +
-      '/removeuser — Удалить\n' +
-      '/listusers — Список'
+      '/adduser — Добавить пользователя\n' +
+      '/removeuser — Удалить пользователя\n' +
+      '/listusers — Список пользователей'
     );
   } catch (e) {
     console.error('start error:', e);
@@ -197,11 +190,21 @@ bot.help(async (ctx) => {
   
   ctx.reply(
     '📖 Помощь\n\n' +
-    '/new_approval — Создать согласование\n' +
-    '/new_task — Создать поручение\n' +
-    '/my_tasks — Мои задачи\n' +
-    '/my_approvals — Мои согласования\n' +
-    '/my_errands — Мои поручения'
+    'СОЗДАНИЕ СОГЛАСОВАНИЯ:\n' +
+    '/new_approval — следуйте инструкциям\n' +
+    'Или отправьте файл с подписью "Согласование: название"\n\n' +
+    'СОЗДАНИЕ ПОРУЧЕНИЯ:\n' +
+    '/new_task — следуйте инструкциям\n\n' +
+    'ПРОСМОТР:\n' +
+    '/my_tasks — ваши активные задачи\n' +
+    '/my_approvals — ваши согласования\n' +
+    '/my_errands — ваши поручения (как создатель)\n\n' +
+    'Для согласующих:\n' +
+    'После согласования можно переслать на оплату\n\n' +
+    'Для администратора:\n' +
+    '/adduser @username Имя Фамилия\n' +
+    '/removeuser @username\n' +
+    '/listusers — список всех'
   );
 });
 
@@ -212,7 +215,7 @@ bot.command('new_approval', async (ctx) => {
   if (!user) return;
   
   userStates[ctx.from.id] = { step: 'approval_title' };
-  ctx.reply('📄 Введите название документа:', {
+  ctx.reply('📄 Введите название документа:\n\nНапример: Счёт на оплату от ООО Поставщик', {
     reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime()
   });
 });
@@ -223,7 +226,7 @@ bot.command('my_approvals', async (ctx) => {
   
   try {
     const result = await pool.query(
-      'SELECT a.*, u1.first_name as approver_name FROM approvals a LEFT JOIN users u1 ON a.approver_id = u1.id WHERE a.creator_id = $1 ORDER BY a.created_at DESC LIMIT 20',
+      'SELECT a.*, u1.first_name as approver_name, u2.first_name as payment_to FROM approvals a LEFT JOIN users u1 ON a.approver_id = u1.id LEFT JOIN users u2 ON a.payment_sent_to = u2.id WHERE a.creator_id = $1 ORDER BY a.created_at DESC LIMIT 20',
       [user.id]
     );
     
@@ -237,6 +240,9 @@ bot.command('my_approvals', async (ctx) => {
       message += (i+1) + '. ' + emoji + ' ' + a.title + '\n';
       message += '   💰 ' + a.amount + ' ₽ | ' + a.status + '\n';
       message += '   👤 ' + safeString(a.approver_name) + '\n';
+      if (a.payment_sent_to) {
+        message += '   💸 Отправлено на оплату: ' + safeString(a.payment_to) + '\n';
+      }
       message += '   📅 ' + new Date(a.created_at).toLocaleDateString('ru-RU') + '\n\n';
     });
     
@@ -254,7 +260,7 @@ bot.command('new_task', async (ctx) => {
   if (!user) return;
   
   userStates[ctx.from.id] = { step: 'task_title' };
-  ctx.reply('✅ Введите название задачи:', {
+  ctx.reply('✅ Введите название задачи:\n\nНапример: Подготовить отчёт за март', {
     reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime()
   });
 });
@@ -273,11 +279,11 @@ bot.command('my_tasks', async (ctx) => {
       return ctx.reply('📭 У вас нет активных задач');
     }
     
-    let message = '📋 Ваши задачи:\n\n';
+    let message = '📋 Ваши активные задачи:\n\n';
     result.rows.forEach((t, i) => {
       const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
       message += (i+1) + '. ' + emoji + ' ' + t.title + '\n';
-      message += '   📅 ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
+      message += '   📅 До: ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
       message += '   📌 ' + t.status + '\n';
       message += '   👤 ' + safeString(t.creator_name) + '\n\n';
     });
@@ -303,12 +309,12 @@ bot.command('my_errands', async (ctx) => {
       return ctx.reply('📭 Вы не создавали поручений');
     }
     
-    let message = '📝 Ваши поручения:\n\n';
+    let message = '📝 Ваши поручения (как создатель):\n\n';
     result.rows.forEach((t, i) => {
       const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
       message += (i+1) + '. ' + emoji + ' ' + t.title + '\n';
       message += '   👤 ' + safeString(t.executor_name) + '\n';
-      message += '   📅 ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
+      message += '   📅 До: ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
       message += '   📌 ' + t.status + '\n\n';
     });
     
@@ -345,14 +351,14 @@ bot.on('text', async (ctx) => {
     
     if (state?.step === 'approval_amount') {
       userStates[userId] = { ...state, amount: parseFloat(text) || 0, step: 'approval_description' };
-      return ctx.reply('📝 Введите описание:', {
+      return ctx.reply('📝 Введите описание:\n\nОпишите что нужно согласовать', {
         reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime()
       });
     }
     
     if (state?.step === 'approval_description') {
       userStates[userId] = { ...state, description: text, step: 'approval_file' };
-      return ctx.reply('📎 Прикрепить файл?\n\nОтправьте файл или напишите "нет"', {
+      return ctx.reply('📎 Прикрепить файл?\n\nОтправьте файл или напишите "нет" чтобы пропустить', {
         reply_markup: Markup.keyboard([['❌ Отмена'], ['нет']]).resize().oneTime()
       });
     }
@@ -362,13 +368,12 @@ bot.on('text', async (ctx) => {
         userStates[userId] = { ...state, file_id: null, file_type: null, step: 'approval_approver_list' };
         return showApproverList(ctx, state);
       }
-      userStates[userId] = { ...state, file_id: null, file_type: null, step: 'approval_approver_list' };
-      return showApproverList(ctx, state);
+      return;
     }
     
     if (state?.step === 'task_title') {
       userStates[userId] = { ...state, title: text, step: 'task_description' };
-      return ctx.reply('📝 Введите описание задачи:', {
+      return ctx.reply('📝 Введите описание задачи:\n\nПодробно опишите что нужно сделать', {
         reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime()
       });
     }
@@ -434,11 +439,50 @@ bot.on('photo', async (ctx) => {
   }
 });
 
+bot.on('voice', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
+  const caption = ctx.message.caption || '';
+  const fileId = ctx.message.voice.file_id;
+  
+  if (caption.toLowerCase().includes('согласование:') || caption.toLowerCase().includes('согласуй:')) {
+    await createApprovalFromFile(ctx, caption, fileId, 'voice.ogg', 'voice');
+    return;
+  }
+  
+  const state = userStates[ctx.from.id];
+  if (state?.step === 'approval_file') {
+    userStates[ctx.from.id] = { ...state, file_id: fileId, file_type: 'voice', step: 'approval_approver_list' };
+    return showApproverList(ctx, userStates[ctx.from.id]);
+  }
+});
+
+bot.on('video_note', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
+  const caption = ctx.message.caption || '';
+  const fileId = ctx.message.video_note.file_id;
+  
+  if (caption.toLowerCase().includes('согласование:') || caption.toLowerCase().includes('согласуй:')) {
+    await createApprovalFromFile(ctx, caption, fileId, 'video.mp4', 'video_note');
+    return;
+  }
+  
+  const state = userStates[ctx.from.id];
+  if (state?.step === 'approval_file') {
+    userStates[ctx.from.id] = { ...state, file_id: fileId, file_type: 'video_note', step: 'approval_approver_list' };
+    return showApproverList(ctx, userStates[ctx.from.id]);
+  }
+});
+
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
 async function showApproverList(ctx, state) {
   try {
-    console.log('🔍 showApproverList called');
+    console.log('🔍 showApproverList called for user:', ctx.from.id);
+    
     const result = await pool.query('SELECT id, first_name, last_name, username FROM users WHERE is_active = true ORDER BY id');
     
     console.log('👥 Found users:', result.rows.length);
@@ -447,21 +491,20 @@ async function showApproverList(ctx, state) {
       return ctx.reply('❌ Нет доступных согласующих.\n\nДобавьте пользователей: /adduser');
     }
     
-    const keyboard = [];
-    result.rows.forEach(u => {
+    const buttons = result.rows.map(u => {
       const name = safeString(u.first_name) + ' ' + safeString(u.last_name);
       const username = u.username ? ' @' + u.username : '';
-      keyboard.push([Markup.button.callback(name + username, 'approver_' + u.id)]);
+      return [Markup.button.callback(name + username, 'approver_' + u.id)];
     });
-    keyboard.push([Markup.button.callback('❌ Отмена', 'cancel')]);
+    buttons.push([Markup.button.callback('❌ Отмена', 'cancel')]);
     
-    console.log('⌨️ Keyboard buttons:', keyboard.length);
+    console.log('⌨️ Created buttons:', buttons.length);
     
-    await ctx.reply('👤 Выберите согласующего:', {
-      reply_markup: Markup.inlineKeyboard(keyboard)
+    await ctx.reply('👤 Выберите согласующего:\n\nНажмите на пользователя:', {
+      reply_markup: Markup.inlineKeyboard(buttons)
     });
     
-    console.log('✅ Message sent');
+    console.log('✅ Message sent successfully');
   } catch (e) {
     console.error('❌ showApproverList error:', e);
     ctx.reply('❌ Ошибка при загрузке списка: ' + e.message);
@@ -470,25 +513,32 @@ async function showApproverList(ctx, state) {
 
 async function showExecutorList(ctx, state) {
   try {
+    console.log('🔍 showExecutorList called for user:', ctx.from.id);
+    
     const result = await pool.query('SELECT id, first_name, last_name, username FROM users WHERE is_active = true ORDER BY id');
+    
+    console.log('👥 Found users:', result.rows.length);
     
     if (result.rows.length === 0) {
       return ctx.reply('❌ Нет доступных исполнителей.\n\nДобавьте пользователей: /adduser');
     }
     
-    const keyboard = [];
-    result.rows.forEach(u => {
+    const buttons = result.rows.map(u => {
       const name = safeString(u.first_name) + ' ' + safeString(u.last_name);
       const username = u.username ? ' @' + u.username : '';
-      keyboard.push([Markup.button.callback(name + username, 'executor_' + u.id)]);
+      return [Markup.button.callback(name + username, 'executor_' + u.id)];
     });
-    keyboard.push([Markup.button.callback('❌ Отмена', 'cancel')]);
+    buttons.push([Markup.button.callback('❌ Отмена', 'cancel')]);
     
-    await ctx.reply('👤 Выберите исполнителя:', {
-      reply_markup: Markup.inlineKeyboard(keyboard)
+    console.log('⌨️ Created buttons:', buttons.length);
+    
+    await ctx.reply('👤 Выберите исполнителя:\n\nНажмите на пользователя:', {
+      reply_markup: Markup.inlineKeyboard(buttons)
     });
+    
+    console.log('✅ Message sent successfully');
   } catch (e) {
-    console.error('showExecutorList error:', e);
+    console.error('❌ showExecutorList error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
   }
 }
@@ -505,7 +555,7 @@ async function createApprovalFromFile(ctx, caption, fileId, fileName, fileType) 
       [title, 'Файл: ' + fileName, user.id, fileId, fileType]
     );
     
-    ctx.reply('✅ Согласование #' + result.rows[0].id + ' создано!\n\n📄 ' + title);
+    ctx.reply('✅ Согласование #' + result.rows[0].id + ' создано!\n\n📄 ' + title + '\n📎 Файл: ' + fileName);
   } catch (e) {
     console.error('createApprovalFromFile error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
@@ -537,17 +587,18 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
     
     delete userStates[userId];
     
-    await ctx.reply('✅ Согласование #' + result.rows[0].id + ' создано!', {
+    await ctx.reply('✅ Согласование #' + result.rows[0].id + ' создано!\n\n📄 ' + state.title + '\n💰 ' + state.amount + ' ₽', {
       reply_markup: Markup.removeKeyboard()
     });
     
-    const approver = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approverId]);
+    const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
     if (approver.rows.length > 0) {
       await bot.telegram.sendMessage(
         approver.rows[0].telegram_id,
         '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
         '📄 ' + state.title + '\n' +
-        '💰 ' + state.amount + ' ₽\n\n' +
+        '💰 ' + state.amount + ' ₽\n' +
+        '📝 ' + state.description + '\n\n' +
         '👤 От: ' + safeString(ctx.from.first_name),
         {
           reply_markup: Markup.inlineKeyboard([
@@ -578,7 +629,7 @@ bot.action(/^executor_(\d+)/, async (ctx) => {
     const executorId = parseInt(ctx.match[1]);
     userStates[userId] = { ...state, executor_id: executorId, step: 'task_deadline' };
     
-    await ctx.reply('📅 Введите срок (ДД.ММ.ГГГГ):\n\nПример: 25.03.2026', {
+    await ctx.reply('📅 Введите срок выполнения:\n\nВ формате: ДД.ММ.ГГГГ\nНапример: 25.03.2026', {
       reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime()
     });
     
@@ -610,17 +661,19 @@ bot.action(/^priority_(\w+)/, async (ctx) => {
     
     delete userStates[userId];
     
-    await ctx.reply('✅ Поручение #' + result.rows[0].id + ' создано!', {
+    await ctx.reply('✅ Поручение #' + result.rows[0].id + ' создано!\n\n📋 ' + state.title + '\n📅 Срок: ' + state.deadline + '\n🔥 Приоритет: ' + priority, {
       reply_markup: Markup.removeKeyboard()
     });
     
-    const executor = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [state.executor_id]);
+    const executor = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [state.executor_id]);
     if (executor.rows.length > 0) {
       await bot.telegram.sendMessage(
         executor.rows[0].telegram_id,
         '🔔 Новое поручение #' + result.rows[0].id + '\n\n' +
         '📋 ' + state.title + '\n' +
-        '📅 Срок: ' + state.deadline + '\n\n' +
+        '📝 ' + state.description + '\n' +
+        '📅 Срок: ' + state.deadline + '\n' +
+        '🔥 Приоритет: ' + priority + '\n\n' +
         '👤 От: ' + safeString(ctx.from.first_name)
       );
     }
@@ -637,18 +690,25 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
     
-    await pool.query('UPDATE approvals SET status = \'approved\' WHERE id = $1', [approvalId]);
+    await pool.query('UPDATE approvals SET status = \'approved\', updated_at = NOW() WHERE id = $1', [approvalId]);
     
-    const users = await pool.query('SELECT id, first_name, last_name FROM users WHERE is_active = true');
+    const users = await pool.query('SELECT id, first_name, last_name FROM users WHERE is_active = true ORDER BY id');
     
     const keyboard = users.rows.map(u => 
-      [Markup.button.callback('💸 ' + safeString(u.first_name) + ' (на оплату)', 'payment_' + approvalId + '_' + u.id)]
+      [Markup.button.callback('💸 ' + safeString(u.first_name) + ' ' + safeString(u.last_name) + ' (на оплату)', 'payment_' + approvalId + '_' + u.id)]
     );
     keyboard.push([Markup.button.callback('⏭ Пропустить', 'payment_skip_' + approvalId)]);
     
-    await ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId + '\n\nОтправить на оплату?', {
+    await ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId + '\n\nСогласование одобрено!\n\n💸 Отправить на оплату?\n\nВыберите получателя:', {
       reply_markup: Markup.inlineKeyboard(keyboard)
     });
+    
+    const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
+    const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+    
+    if (creator.rows.length > 0) {
+      await bot.telegram.sendMessage(creator.rows[0].telegram_id, '✅ Ваше согласование #' + approvalId + ' одобрено!');
+    }
     
     await ctx.answerCbQuery();
   } catch (e) {
@@ -662,20 +722,32 @@ bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
     const approvalId = parseInt(ctx.match[1]);
     const paymentToId = parseInt(ctx.match[2]);
     
-    await pool.query('UPDATE approvals SET payment_sent_to = $1, payment_status = \'sent\' WHERE id = $2', [paymentToId, approvalId]);
+    await pool.query('UPDATE approvals SET payment_sent_to = $1, payment_status = \'sent\', updated_at = NOW() WHERE id = $2', [paymentToId, approvalId]);
     
-    const accountant = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [paymentToId]);
+    const accountant = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [paymentToId]);
+    const approval = await pool.query('SELECT * FROM approvals WHERE id = $1', [approvalId]);
+    
     if (accountant.rows.length > 0) {
       await bot.telegram.sendMessage(
         accountant.rows[0].telegram_id,
-        '💰 Счёт на оплату #' + approvalId + '\n\nТребуется оплата.'
+        '💰 Новый счёт на оплату #' + approvalId + '\n\n' +
+        '📄 ' + approval.rows[0].title + '\n' +
+        '💰 ' + approval.rows[0].amount + ' ₽\n' +
+        '📝 ' + approval.rows[0].description + '\n\n' +
+        '✅ Уже согласовано!',
+        {
+          reply_markup: Markup.inlineKeyboard([
+            [Markup.button.callback('✅ Оплачено', 'paid_' + approvalId)]
+          ])
+        }
       );
     }
     
-    await ctx.editMessageText('✅ Отправлено на оплату');
+    await ctx.editMessageText('✅ СОГЛАСОВАНО И ОТПРАВЛЕНО НА ОПЛАТУ\n\nСогласование #' + approvalId + ' одобрено и передано.');
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('payment action error:', e);
+    ctx.reply('❌ Ошибка: ' + e.message);
     ctx.answerCbQuery('Ошибка');
   }
 });
@@ -684,7 +756,26 @@ bot.action(/^payment_skip_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
     await pool.query('UPDATE approvals SET payment_status = \'not_required\' WHERE id = $1', [approvalId]);
-    await ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId);
+    await ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId + '\n\nСогласование одобрено (на оплату не отправлено).');
+    await ctx.answerCbQuery();
+  } catch (e) {
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+bot.action(/^paid_(\d+)/, async (ctx) => {
+  try {
+    const approvalId = parseInt(ctx.match[1]);
+    await pool.query('UPDATE approvals SET status = \'paid\', payment_status = \'paid\' WHERE id = $1', [approvalId]);
+    await ctx.editMessageText('💰 ОПЛАЧЕНО #' + approvalId + '\n\nСчёт оплачен!');
+    
+    const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
+    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+    
+    if (creator.rows.length > 0) {
+      await bot.telegram.sendMessage(creator.rows[0].telegram_id, '💰 Ваше согласование #' + approvalId + ' оплачено!');
+    }
+    
     await ctx.answerCbQuery();
   } catch (e) {
     ctx.answerCbQuery('Ошибка');
@@ -694,8 +785,16 @@ bot.action(/^payment_skip_(\d+)/, async (ctx) => {
 bot.action(/^reject_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
-    await pool.query('UPDATE approvals SET status = \'rejected\' WHERE id = $1', [approvalId]);
-    await ctx.editMessageText('❌ ОТКЛОНЕНО #' + approvalId);
+    await pool.query('UPDATE approvals SET status = \'rejected\', updated_at = NOW() WHERE id = $1', [approvalId]);
+    await ctx.editMessageText('❌ ОТКЛОНЕНО #' + approvalId + '\n\nСогласование отклонено.');
+    
+    const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
+    const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+    
+    if (creator.rows.length > 0) {
+      await bot.telegram.sendMessage(creator.rows[0].telegram_id, '❌ Ваше согласование #' + approvalId + ' отклонено.');
+    }
+    
     await ctx.answerCbQuery();
   } catch (e) {
     ctx.answerCbQuery('Ошибка');
@@ -712,9 +811,18 @@ bot.action(/^cancel$/, async (ctx) => {
 
 bot.launch().then(() => {
   console.log('✅ Бот запущен!');
+  console.log('📱 Telegram: @Corp_docs_bot');
+  console.log('⏹  Для остановки: pm2 stop corp-docs-bot');
 }).catch(err => {
   console.error('❌ Ошибка запуска:', err);
 });
 
-process.on('SIGINT', () => bot.stop('SIGINT'));
-process.on('SIGTERM', () => bot.stop('SIGTERM'));
+process.on('SIGINT', () => {
+  bot.stop('SIGINT');
+  console.log('🛑 Бот остановлен (SIGINT)');
+});
+
+process.on('SIGTERM', () => {
+  bot.stop('SIGTERM');
+  console.log('🛑 Бот остановлен (SIGTERM)');
+});
