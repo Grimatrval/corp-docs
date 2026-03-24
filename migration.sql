@@ -1,19 +1,20 @@
--- Миграция: добавляем новые поля (без потери данных!)
+-- Миграция базы данных для Corporate Docs Bot
+-- Безопасное обновление без потери данных!
 
--- Таблица users
+-- ===== ТАБЛИЦА USERS =====
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(255);
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'employee';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen TIMESTAMP DEFAULT NOW();
 
--- Таблица approvals
+-- ===== ТАБЛИЦА APPROVALS =====
 ALTER TABLE approvals ADD COLUMN IF NOT EXISTS file_id VARCHAR(255);
 ALTER TABLE approvals ADD COLUMN IF NOT EXISTS file_type VARCHAR(50);
 ALTER TABLE approvals ADD COLUMN IF NOT EXISTS payment_sent_to INTEGER REFERENCES users(id);
 ALTER TABLE approvals ADD COLUMN IF NOT EXISTS payment_status VARCHAR(50) DEFAULT 'not_required';
 
--- Таблица tasks (если нет)
+-- ===== ТАБЛИЦА TASKS (если нет) =====
 CREATE TABLE IF NOT EXISTS tasks (
   id SERIAL PRIMARY KEY,
   title VARCHAR(255) NOT NULL,
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Индексы
+-- ===== ИНДЕКСЫ =====
 CREATE INDEX IF NOT EXISTS idx_users_telegram ON users(telegram_id);
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_approvals_creator ON approvals(creator_id);
@@ -36,3 +37,6 @@ CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status);
 CREATE INDEX IF NOT EXISTS idx_tasks_executor ON tasks(executor_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_creator ON tasks(creator_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+
+-- ===== СООБЩЕНИЕ ОБ УСПЕХЕ =====
+SELECT '✅ Миграция успешно выполнена!' as status;
