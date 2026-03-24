@@ -7,47 +7,55 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const userStates = {};
 
-// ========== ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ==========
-function escapeText(text) {
-  if (!text) return '';
-  return String(text).replace(/_/g, '\\_').replace(/\*/g, '\\*').replace(/\[/g, '\\[').replace(/]/g, '\\]').replace(/~/g, '\\~').replace(/`/g, '\\`');
+// ========== ПРОВЕРКА ДОСТУПА ==========
+async function checkAccess(ctx) {
+  const telegramId = ctx.from.id.toString();
+  const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1 AND is_active = true', [telegramId]);
+  
+  if (user.rows.length === 0) {
+    ctx.reply('❌ ДОСТУП ЗАПРЕЩЁН\n\nВы не зарегистрированы в системе.\n\nОбратитесь к администратору для добавления в систему.\n\nПосле регистрации вы сможете:\n- Создавать согласования\n- Создавать поручения\n- Просматривать задачи');
+    return false;
+  }
+  
+  return user.rows[0];
 }
 
 // ========== АДМИН КОМАНДЫ ==========
 
 bot.command('adduser', async (ctx) => {
-  const telegramId = ctx.from.id.toString();
-  const adminCheck = await pool.query('SELECT * FROM users WHERE telegram_id = $1 AND role = \'admin\'', [telegramId]);
+  const user = await checkAccess(ctx);
+  if (!user) return;
   
-  if (adminCheck.rows.length === 0) {
+  if (user.role !== 'admin') {
     return ctx.reply('❌ Только администратор может добавлять пользователей');
   }
   
   const args = ctx.message.text.split(' ');
-  if (args.length < 3) {
-    return ctx.reply('❌ Использование: /adduser @username Имя Фамилия');
+  if (args.length < 4) {
+    return ctx.reply('❌ Использование: /adduser @username Имя Фамилия\n\nПример: /adduser @ivanov Иван Иванов');
   }
   
   const username = args[1].replace('@', '');
-  const firstName = args[2] || '';
-  const lastName = args[3] || '';
+  const firstName = args[2];
+  const lastName = args[3];
   
   try {
     const result = await pool.query(
       'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', true) ON CONFLICT (telegram_id) DO UPDATE SET first_name = $2, last_name = $3, username = $4, is_active = true RETURNING *',
       [username, firstName, lastName, username]
     );
-    ctx.reply('✅ Пользователь добавлен:\n👤 ' + firstName + ' ' + lastName + '\n@' + username + '\nID: ' + result.rows[0].id);
+    
+    ctx.reply('✅ Пользователь добавлен:\n\n👤 ' + firstName + ' ' + lastName + '\n@' + username + '\nID: ' + result.rows[0].id + '\n\nПользователь может начать работу с ботом.');
   } catch (e) {
     ctx.reply('❌ Ошибка: ' + e.message);
   }
 });
 
 bot.command('removeuser', async (ctx) => {
-  const telegramId = ctx.from.id.toString();
-  const adminCheck = await pool.query('SELECT * FROM users WHERE telegram_id = $1 AND role = \'admin\'', [telegramId]);
+  const user = await checkAccess(ctx);
+  if (!user) return;
   
-  if (adminCheck.rows.length === 0) {
+  if (user.role !== 'admin') {
     return ctx.reply('❌ Только администратор может удалять пользователей');
   }
   
@@ -59,14 +67,14 @@ bot.command('removeuser', async (ctx) => {
   try {
     const identifier = args[1].replace('@', '');
     const result = await pool.query(
-      'UPDATE users SET is_active = false WHERE (username = $1 OR id = $2) RETURNING *',
+      'UPDATE users SET is_active = false WHERE (username = $1 OR id = $2) AND role != \'admin\' RETURNING *',
       [identifier, parseInt(identifier) || 0]
     );
     
     if (result.rows.length > 0) {
-      ctx.reply('✅ Пользователь деактивирован: ' + result.rows[0].first_name + ' ' + result.rows[0].last_name);
+      ctx.reply('✅ Пользователь деактивирован:\n' + result.rows[0].first_name + ' ' + result.rows[0].last_name);
     } else {
-      ctx.reply('❌ Пользователь не найден');
+      ctx.reply('❌ Пользователь не найден или это администратор');
     }
   } catch (e) {
     ctx.reply('❌ Ошибка: ' + e.message);
@@ -74,8 +82,11 @@ bot.command('removeuser', async (ctx) => {
 });
 
 bot.command('listusers', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   try {
-    const result = await pool.query('SELECT * FROM users WHERE is_active = true ORDER BY id');
+    const result = await pool.query('SELECT * FROM users WHERE is_active = true ORDER BY role, id');
     
     if (result.rows.length === 0) {
       return ctx.reply('📭 Нет активных пользователей');
@@ -83,7 +94,8 @@ bot.command('listusers', async (ctx) => {
     
     let message = '👥 Активные пользователи:\n\n';
     result.rows.forEach((u, i) => {
-      message += (i+1) + '. ' + u.first_name + ' ' + u.last_name + ' (@' + (u.username || 'нет') + ')\n   Роль: ' + u.role + '\n\n';
+      const roleEmoji = { admin: '👑', director: '👔', accountant: '💰', employee: '👤' }[u.role] || '👤';
+      message += (i+1) + '. ' + roleEmoji + ' ' + u.first_name + ' ' + u.last_name + ' (@' + (u.username || 'нет') + ')\n   Роль: ' + u.role + '\n\n';
     });
     
     ctx.reply(message);
@@ -97,16 +109,49 @@ bot.command('listusers', async (ctx) => {
 bot.start(async (ctx) => {
   const telegramId = ctx.from.id.toString();
   
-  let user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [telegramId]);
+  const user = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [telegramId]);
   
   if (user.rows.length === 0) {
     await pool.query(
-      'INSERT INTO users (telegram_id, first_name, last_name, username) VALUES ($1, $2, $3, $4)',
+      'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', false)',
       [telegramId, ctx.from.first_name, ctx.from.last_name || '', ctx.from.username || '']
     );
-  } else {
-    await pool.query('UPDATE users SET last_seen = NOW() WHERE telegram_id = $1', [telegramId]);
+    
+    ctx.reply(
+      '👋 Добро пожаловать, ' + ctx.from.first_name + '!\n\n' +
+      '⚠️ ВАША РЕГИСТРАЦИЯ НА РАССМОТРЕНИИ\n\n' +
+      'Администратор получит уведомление о вашей регистрации.\nПосле подтверждения вы получите доступ к системе.\n\n' +
+      'Что вы сможете делать:\n' +
+      '• Создавать согласования документов\n' +
+      '• Создавать поручения сотрудникам\n' +
+      '• Просматривать свои задачи\n' +
+      '• Отслеживать статус согласований\n\n' +
+      'Команда /help — помощь'
+    );
+    
+    // Уведомить админов
+    const admins = await pool.query('SELECT telegram_id FROM users WHERE role = \'admin\' AND is_active = true');
+    admins.rows.forEach(async admin => {
+      try {
+        await bot.telegram.sendMessage(admin.telegram_id, 
+          '🔔 Новый пользователь ожидает активации:\n\n' +
+          '👤 ' + ctx.from.first_name + ' ' + (ctx.from.last_name || '') + '\n' +
+          '@' + (ctx.from.username || 'нет username') + '\n' +
+          'ID: ' + telegramId + '\n\n' +
+          'Для активации:\n' +
+          '/adduser @' + (ctx.from.username || '') + ' ' + ctx.from.first_name + ' ' + (ctx.from.last_name || '')
+        );
+      } catch (e) { /* ignore */ }
+    });
+    
+    return;
   }
+  
+  if (!user.rows[0].is_active) {
+    return ctx.reply('⏳ Ваша регистрация ещё не активирована администратором.\n\nПожалуйста, дождитесь подтверждения.');
+  }
+  
+  await pool.query('UPDATE users SET last_seen = NOW() WHERE telegram_id = $1', [telegramId]);
   
   ctx.reply(
     '👋 Добро пожаловать, ' + ctx.from.first_name + '!\n\n' +
@@ -126,15 +171,18 @@ bot.start(async (ctx) => {
   );
 });
 
-bot.help((ctx) => {
+bot.help(async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   ctx.reply(
     '📖 Помощь\n\n' +
-    'Создание согласования:\n' +
+    'СОЗДАНИЕ СОГЛАСОВАНИЯ:\n' +
     '/new_approval — следуйте инструкциям\n' +
     'Или отправьте файл с подписью "Согласование: название"\n\n' +
-    'Создание поручения:\n' +
+    'СОЗДАНИЕ ПОРУЧЕНИЯ:\n' +
     '/new_task — следуйте инструкциям\n\n' +
-    'Просмотр:\n' +
+    'ПРОСМОТР:\n' +
     '/my_tasks — ваши активные задачи\n' +
     '/my_approvals — ваши согласования\n' +
     '/my_errands — ваши поручения (как создатель)\n\n' +
@@ -143,13 +191,16 @@ bot.help((ctx) => {
     'Для администратора:\n' +
     '/adduser @username Имя Фамилия\n' +
     '/removeuser @username\n' +
-    '/listusers'
+    '/listusers — список всех'
   );
 });
 
 // ========== СОГЛАСОВАНИЯ ==========
 
-bot.command('new_approval', (ctx) => {
+bot.command('new_approval', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   userStates[ctx.from.id] = { step: 'approval_title' };
   ctx.reply('📄 Введите название документа:\n\nНапример: Счёт на оплату от ООО Поставщик', {
     reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime()
@@ -157,18 +208,13 @@ bot.command('new_approval', (ctx) => {
 });
 
 bot.command('my_approvals', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   try {
-    const telegramId = ctx.from.id.toString();
-    const userResult = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegramId]);
-    
-    if (userResult.rows.length === 0) {
-      return ctx.reply('❌ Пользователь не найден. Нажмите /start');
-    }
-    
-    const userId = userResult.rows[0].id;
     const result = await pool.query(
       'SELECT a.*, u1.first_name as approver_name, u2.first_name as payment_to FROM approvals a LEFT JOIN users u1 ON a.approver_id = u1.id LEFT JOIN users u2 ON a.payment_sent_to = u2.id WHERE a.creator_id = $1 ORDER BY a.created_at DESC LIMIT 20',
-      [userId]
+      [user.id]
     );
     
     if (result.rows.length === 0) {
@@ -195,7 +241,10 @@ bot.command('my_approvals', async (ctx) => {
 
 // ========== ПОРУЧЕНИЯ ==========
 
-bot.command('new_task', (ctx) => {
+bot.command('new_task', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   userStates[ctx.from.id] = { step: 'task_title' };
   ctx.reply('✅ Введите название задачи:\n\nНапример: Подготовить отчёт за март', {
     reply_markup: Markup.keyboard([['❌ Отмена']]).resize().oneTime()
@@ -203,18 +252,13 @@ bot.command('new_task', (ctx) => {
 });
 
 bot.command('my_tasks', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   try {
-    const telegramId = ctx.from.id.toString();
-    const userResult = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegramId]);
-    
-    if (userResult.rows.length === 0) {
-      return ctx.reply('❌ Пользователь не найден. Нажмите /start');
-    }
-    
-    const userId = userResult.rows[0].id;
     const result = await pool.query(
       'SELECT t.*, u.first_name as creator_name FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE t.executor_id = $1 AND t.status != \'completed\' ORDER BY t.deadline ASC',
-      [userId]
+      [user.id]
     );
     
     if (result.rows.length === 0) {
@@ -237,18 +281,13 @@ bot.command('my_tasks', async (ctx) => {
 });
 
 bot.command('my_errands', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   try {
-    const telegramId = ctx.from.id.toString();
-    const userResult = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegramId]);
-    
-    if (userResult.rows.length === 0) {
-      return ctx.reply('❌ Пользователь не найден. Нажмите /start');
-    }
-    
-    const userId = userResult.rows[0].id;
     const result = await pool.query(
       'SELECT t.*, u.first_name as executor_name FROM tasks t LEFT JOIN users u ON t.executor_id = u.id WHERE t.creator_id = $1 ORDER BY t.created_at DESC LIMIT 20',
-      [userId]
+      [user.id]
     );
     
     if (result.rows.length === 0) {
@@ -280,6 +319,9 @@ bot.on('text', async (ctx) => {
     delete userStates[userId];
     return ctx.reply('❌ Отменено', { reply_markup: Markup.removeKeyboard() });
   }
+  
+  const user = await checkAccess(ctx);
+  if (!user) return;
   
   const state = userStates[userId];
   
@@ -328,11 +370,25 @@ bot.on('text', async (ctx) => {
     userStates[userId] = { ...state, description: text, step: 'task_executor_list' };
     return showExecutorList(ctx, state);
   }
+  
+  if (state?.step === 'task_deadline') {
+    userStates[userId] = { ...state, deadline: text, step: 'task_priority' };
+    return ctx.reply('🔥 Выберите приоритет:\n\nНажмите на кнопку:', {
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback('🟢 Низкий', 'priority_low')],
+        [Markup.button.callback('🟡 Средний', 'priority_medium')],
+        [Markup.button.callback('🔴 Высокий', 'priority_high')]
+      ])
+    });
+  }
 });
 
 // ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 bot.on('document', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   const caption = ctx.message.caption || '';
   const fileId = ctx.message.document.file_id;
   const fileName = ctx.message.document.file_name;
@@ -350,6 +406,9 @@ bot.on('document', async (ctx) => {
 });
 
 bot.on('photo', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   const caption = ctx.message.caption || '';
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
   
@@ -366,6 +425,9 @@ bot.on('photo', async (ctx) => {
 });
 
 bot.on('voice', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   const caption = ctx.message.caption || '';
   const fileId = ctx.message.voice.file_id;
   
@@ -382,6 +444,9 @@ bot.on('voice', async (ctx) => {
 });
 
 bot.on('video_note', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  
   const caption = ctx.message.caption || '';
   const fileId = ctx.message.video_note.file_id;
   
@@ -401,7 +466,7 @@ bot.on('video_note', async (ctx) => {
 
 async function showApproverList(ctx, state) {
   try {
-    const result = await pool.query('SELECT id, first_name, last_name, username FROM users WHERE is_active = true AND role IN (\'admin\', \'director\', \'accountant\') ORDER BY id');
+    const result = await pool.query('SELECT id, first_name, last_name, username FROM users WHERE is_active = true ORDER BY id');
     
     if (result.rows.length === 0) {
       return ctx.reply('❌ Нет доступных согласующих. Обратитесь к администратору.', { reply_markup: Markup.removeKeyboard() });
@@ -410,7 +475,7 @@ async function showApproverList(ctx, state) {
     const keyboard = result.rows.map(u => [Markup.button.callback(u.first_name + ' ' + u.last_name + ' (@' + (u.username || 'нет') + ')', 'approver_' + u.id)]);
     keyboard.push([Markup.button.callback('❌ Отмена', 'cancel')]);
     
-    ctx.reply('👤 Выберите согласующего:\n\nНажмите на кнопку:', {
+    ctx.reply('👤 Выберите согласующего:\n\nНажмите на пользователя:', {
       reply_markup: Markup.inlineKeyboard(keyboard)
     });
   } catch (e) {
@@ -429,7 +494,7 @@ async function showExecutorList(ctx, state) {
     const keyboard = result.rows.map(u => [Markup.button.callback(u.first_name + ' ' + u.last_name + ' (@' + (u.username || 'нет') + ')', 'executor_' + u.id)]);
     keyboard.push([Markup.button.callback('❌ Отмена', 'cancel')]);
     
-    ctx.reply('👤 Выберите исполнителя:\n\nНажмите на кнопку:', {
+    ctx.reply('👤 Выберите исполнителя:\n\nНажмите на пользователя:', {
       reply_markup: Markup.inlineKeyboard(keyboard)
     });
   } catch (e) {
@@ -439,19 +504,12 @@ async function showExecutorList(ctx, state) {
 
 async function createApprovalFromFile(ctx, caption, fileId, fileName, fileType) {
   try {
+    const user = await checkAccess(ctx);
+    if (!user) return;
+    
     const title = caption.replace(/согласование:|согласуй:/i, '').trim();
-    const telegramId = ctx.from.id.toString();
     
-    let userResult = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [telegramId]);
-    let creatorId;
-    if (userResult.rows.length === 0) {
-      const newUser = await pool.query('INSERT INTO users (telegram_id, first_name, last_name, username) VALUES ($1, $2, $3, $4) RETURNING id', [telegramId, ctx.from.first_name, ctx.from.last_name || '', ctx.from.username || '']);
-      creatorId = newUser.rows[0].id;
-    } else {
-      creatorId = userResult.rows[0].id;
-    }
-    
-    const result = await pool.query('INSERT INTO approvals (title, description, creator_id, file_id, file_type, status) VALUES ($1, $2, $3, $4, $5, \'pending\') RETURNING *', [title, 'Файл: ' + fileName, creatorId, fileId, fileType]);
+    const result = await pool.query('INSERT INTO approvals (title, description, creator_id, file_id, file_type, status) VALUES ($1, $2, $3, $4, $5, \'pending\') RETURNING *', [title, 'Файл: ' + fileName, user.id, fileId, fileType]);
     
     ctx.reply('✅ Согласование #' + result.rows[0].id + ' создано!\n\n📄 ' + title + '\n📎 Файл: ' + fileName);
   } catch (e) {
@@ -472,16 +530,10 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
   const approverId = parseInt(ctx.match[1]);
   
   try {
-    let userResult = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [userId.toString()]);
-    let creatorId;
-    if (userResult.rows.length === 0) {
-      const newUser = await pool.query('INSERT INTO users (telegram_id, first_name, last_name, username) VALUES ($1, $2, $3, $4) RETURNING id', [userId.toString(), ctx.from.first_name, ctx.from.last_name || '', ctx.from.username || '']);
-      creatorId = newUser.rows[0].id;
-    } else {
-      creatorId = userResult.rows[0].id;
-    }
+    const user = await checkAccess(ctx);
+    if (!user) return;
     
-    const result = await pool.query('INSERT INTO approvals (title, description, amount, creator_id, approver_id, file_id, file_type, status) VALUES ($1,$2,$3,$4,$5,$6,$7,\'pending\') RETURNING *', [state.title, state.description, state.amount, creatorId, approverId, state.file_id, state.file_type]);
+    const result = await pool.query('INSERT INTO approvals (title, description, amount, creator_id, approver_id, file_id, file_type, status) VALUES ($1,$2,$3,$4,$5,$6,$7,\'pending\') RETURNING *', [state.title, state.description, state.amount, user.id, approverId, state.file_id, state.file_type]);
     
     delete userStates[userId];
     
@@ -533,19 +585,13 @@ bot.action(/^priority_(\w+)/, async (ctx) => {
   const priority = ctx.match[1];
   
   try {
-    let userResult = await pool.query('SELECT id FROM users WHERE telegram_id = $1', [userId.toString()]);
-    let creatorId;
-    if (userResult.rows.length === 0) {
-      const newUser = await pool.query('INSERT INTO users (telegram_id, first_name, last_name, username) VALUES ($1, $2, $3, $4) RETURNING id', [userId.toString(), ctx.from.first_name, ctx.from.last_name || '', ctx.from.username || '']);
-      creatorId = newUser.rows[0].id;
-    } else {
-      creatorId = userResult.rows[0].id;
-    }
+    const user = await checkAccess(ctx);
+    if (!user) return;
     
     const parts = state.deadline.split('.');
     const deadline = parts[2] + '-' + parts[1] + '-' + parts[0];
     
-    const result = await pool.query('INSERT INTO tasks (title, description, creator_id, executor_id, deadline, priority, status) VALUES ($1,$2,$3,$4,$5,$6,\'pending\') RETURNING *', [state.title, state.description, creatorId, state.executor_id, deadline, priority]);
+    const result = await pool.query('INSERT INTO tasks (title, description, creator_id, executor_id, deadline, priority, status) VALUES ($1,$2,$3,$4,$5,$6,\'pending\') RETURNING *', [state.title, state.description, user.id, state.executor_id, deadline, priority]);
     
     delete userStates[userId];
     
@@ -571,7 +617,7 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
   try {
     await pool.query('UPDATE approvals SET status = \'approved\', updated_at = NOW() WHERE id = $1', [approvalId]);
     
-    const accountants = await pool.query('SELECT id, first_name, last_name FROM users WHERE is_active = true AND role = \'accountant\'');
+    const accountants = await pool.query('SELECT id, first_name, last_name FROM users WHERE is_active = true ORDER BY id');
     
     let keyboard = [];
     if (accountants.rows.length > 0) {
@@ -579,7 +625,7 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
       keyboard.push([Markup.button.callback('⏭ Пропустить', 'payment_skip_' + approvalId)]);
     }
     
-    ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId + '\n\nСогласование одобрено!\n\n💸 Отправить на оплату?\n\nВыберите бухгалтера или пропустите:', {
+    ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId + '\n\nСогласование одобрено!\n\n💸 Отправить на оплату?\n\nВыберите получателя:', {
       reply_markup: Markup.inlineKeyboard(keyboard)
     });
     
@@ -612,7 +658,7 @@ bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
       });
     }
     
-    ctx.editMessageText('✅ СОГЛАСОВАНО И ОТПРАВЛЕНО НА ОПЛАТУ\n\nСогласование #' + approvalId + ' одобрено и передано бухгалтеру.');
+    ctx.editMessageText('✅ СОГЛАСОВАНО И ОТПРАВЛЕНО НА ОПЛАТУ\n\nСогласование #' + approvalId + ' одобрено и передано.');
     
     ctx.answerCbQuery();
   } catch (e) {
