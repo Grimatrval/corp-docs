@@ -491,18 +491,25 @@ async function showApproverList(ctx, state) {
       return ctx.reply('❌ Нет доступных согласующих.\n\nДобавьте пользователей: /adduser');
     }
     
-    const buttons = result.rows.map(u => {
+    const buttons = [];
+    result.rows.forEach(u => {
       const name = safeString(u.first_name) + ' ' + safeString(u.last_name);
       const username = u.username ? ' @' + u.username : '';
-      return [Markup.button.callback(name + username, 'approver_' + u.id)];
+      buttons.push([Markup.button.callback(name + username, 'approver_' + u.id)]);
     });
     buttons.push([Markup.button.callback('❌ Отмена', 'cancel')]);
     
     console.log('⌨️ Created buttons:', buttons.length);
     
-    await ctx.reply('👤 Выберите согласующего:\n\nНажмите на пользователя:', {
-      reply_markup: Markup.inlineKeyboard(buttons)
-    });
+    await ctx.telegram.sendMessage(
+      ctx.chat.id,
+      '👤 Выберите согласующего:\n\nНажмите на пользователя:',
+      {
+        reply_markup: {
+          inline_keyboard: buttons
+        }
+      }
+    );
     
     console.log('✅ Message sent successfully');
   } catch (e) {
@@ -523,18 +530,25 @@ async function showExecutorList(ctx, state) {
       return ctx.reply('❌ Нет доступных исполнителей.\n\nДобавьте пользователей: /adduser');
     }
     
-    const buttons = result.rows.map(u => {
+    const buttons = [];
+    result.rows.forEach(u => {
       const name = safeString(u.first_name) + ' ' + safeString(u.last_name);
       const username = u.username ? ' @' + u.username : '';
-      return [Markup.button.callback(name + username, 'executor_' + u.id)];
+      buttons.push([Markup.button.callback(name + username, 'executor_' + u.id)]);
     });
     buttons.push([Markup.button.callback('❌ Отмена', 'cancel')]);
     
     console.log('⌨️ Created buttons:', buttons.length);
     
-    await ctx.reply('👤 Выберите исполнителя:\n\nНажмите на пользователя:', {
-      reply_markup: Markup.inlineKeyboard(buttons)
-    });
+    await ctx.telegram.sendMessage(
+      ctx.chat.id,
+      '👤 Выберите исполнителя:\n\nНажмите на пользователя:',
+      {
+        reply_markup: {
+          inline_keyboard: buttons
+        }
+      }
+    );
     
     console.log('✅ Message sent successfully');
   } catch (e) {
