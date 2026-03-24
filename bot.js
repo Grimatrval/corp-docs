@@ -48,18 +48,38 @@ bot.command('adduser', async (ctx) => {
     const firstName = args[2];
     const lastName = args[3];
     
-    const result = await pool.query(
-      'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', true) RETURNING *',
-      [username, firstName, lastName, username]
-    );
-    
-    ctx.reply(
-      '✅ Пользователь добавлен:\n\n' +
-      '👤 ' + firstName + ' ' + lastName + '\n' +
-      '@' + username + '\n' +
-      'ID: ' + result.rows[0].id + '\n\n' +
-      'Пользователь может начать работу с ботом.'
-    );
+    // Пробуем получить chat_id по username
+    try {
+      const chat = await bot.telegram.getChat('@' + username);
+      const telegramId = chat.id.toString();
+      
+      const result = await pool.query(
+        'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', true) ON CONFLICT (telegram_id) DO UPDATE SET first_name = $2, last_name = $3, username = $4, is_active = true RETURNING *',
+        [telegramId, firstName, lastName, username]
+      );
+      
+      ctx.reply(
+        '✅ Пользователь добавлен:\n\n' +
+        '👤 ' + firstName + ' ' + lastName + '\n' +
+        '@' + username + '\n' +
+        'ID: ' + result.rows[0].id + '\n' +
+        'Telegram ID: ' + telegramId + '\n\n' +
+        'Пользователь может начать работу с ботом.'
+      );
+    } catch (e) {
+      ctx.reply(
+        '⚠️ Пользователь добавлен без Telegram ID\n\n' +
+        '👤 ' + firstName + ' ' + lastName + '\n' +
+        '@' + username + '\n\n' +
+        '❗ Не удалось получить Telegram ID.\n' +
+        'Пользователь должен написать боту /start для активации.'
+      );
+      
+      await pool.query(
+        'INSERT INTO users (telegram_id, first_name, last_name, username, role, is_active) VALUES ($1, $2, $3, $4, \'employee\', false) ON CONFLICT (telegram_id) DO UPDATE SET first_name = $2, last_name = $3, username = $4 RETURNING *',
+        [username, firstName, lastName, username]
+      );
+    }
   } catch (e) {
     console.error('adduser error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
@@ -157,8 +177,9 @@ bot.start(async (ctx) => {
       return;
     }
     
+    // Активируем пользователя если был неактивен
     if (!user.rows[0].is_active) {
-      return ctx.reply('⏳ Ваша регистрация ещё не активирована администратором.');
+      await pool.query('UPDATE users SET is_active = true WHERE telegram_id = $1', [telegramId]);
     }
     
     await pool.query('UPDATE users SET last_seen = NOW() WHERE telegram_id = $1', [telegramId]);
@@ -576,6 +597,30 @@ async function createApprovalFromFile(ctx, caption, fileId, fileName, fileType) 
   }
 }
 
+// ========== ОТПРАВКА УВЕДОМЛЕНИЙ ==========
+
+async function sendNotification(telegramId, message, keyboard = null) {
+  try {
+    // Проверяем что telegramId это число
+    if (!telegramId || isNaN(parseInt(telegramId))) {
+      console.log('⚠️ Invalid telegram_id:', telegramId);
+      return false;
+    }
+    
+    await bot.telegram.sendMessage(
+      telegramId.toString(),
+      message,
+      keyboard ? { reply_markup: keyboard } : {}
+    );
+    
+    console.log('✅ Notification sent to:', telegramId);
+    return true;
+  } catch (e) {
+    console.error('❌ sendNotification error:', e.message);
+    return false;
+  }
+}
+
 // ========== CALLBACK QUERY ==========
 
 bot.action(/^approver_(\d+)/, async (ctx) => {
@@ -605,22 +650,28 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
       reply_markup: Markup.removeKeyboard()
     });
     
-    const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
+    // Отправляем уведомление согласующему
+    const approver = await pool.query('SELECT telegram_id, first_name, username FROM users WHERE id = $1', [approverId]);
     if (approver.rows.length > 0) {
-      await bot.telegram.sendMessage(
-        approver.rows[0].telegram_id,
-        '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
-        '📄 ' + state.title + '\n' +
-        '💰 ' + state.amount + ' ₽\n' +
-        '📝 ' + state.description + '\n\n' +
-        '👤 От: ' + safeString(ctx.from.first_name),
-        {
-          reply_markup: Markup.inlineKeyboard([
+      const telegramId = approver.rows[0].telegram_id;
+      
+      // Проверяем что telegram_id это число
+      if (telegramId && !isNaN(parseInt(telegramId))) {
+        await sendNotification(
+          telegramId,
+          '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
+          '📄 ' + state.title + '\n' +
+          '💰 ' + state.amount + ' ₽\n' +
+          '📝 ' + state.description + '\n\n' +
+          '👤 От: ' + safeString(ctx.from.first_name),
+          Markup.inlineKeyboard([
             [Markup.button.callback('✅ Согласовать', 'approve_' + result.rows[0].id)],
             [Markup.button.callback('❌ Отклонить', 'reject_' + result.rows[0].id)]
           ])
-        }
-      );
+        );
+      } else {
+        console.log('⚠️ Cannot notify approver - invalid telegram_id:', telegramId);
+      }
     }
     
     await ctx.answerCbQuery();
@@ -681,15 +732,19 @@ bot.action(/^priority_(\w+)/, async (ctx) => {
     
     const executor = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [state.executor_id]);
     if (executor.rows.length > 0) {
-      await bot.telegram.sendMessage(
-        executor.rows[0].telegram_id,
-        '🔔 Новое поручение #' + result.rows[0].id + '\n\n' +
-        '📋 ' + state.title + '\n' +
-        '📝 ' + state.description + '\n' +
-        '📅 Срок: ' + state.deadline + '\n' +
-        '🔥 Приоритет: ' + priority + '\n\n' +
-        '👤 От: ' + safeString(ctx.from.first_name)
-      );
+      const telegramId = executor.rows[0].telegram_id;
+      
+      if (telegramId && !isNaN(parseInt(telegramId))) {
+        await sendNotification(
+          telegramId,
+          '🔔 Новое поручение #' + result.rows[0].id + '\n\n' +
+          '📋 ' + state.title + '\n' +
+          '📝 ' + state.description + '\n' +
+          '📅 Срок: ' + state.deadline + '\n' +
+          '🔥 Приоритет: ' + priority + '\n\n' +
+          '👤 От: ' + safeString(ctx.from.first_name)
+        );
+      }
     }
     
     await ctx.answerCbQuery();
@@ -706,7 +761,7 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
     
     await pool.query('UPDATE approvals SET status = \'approved\', updated_at = NOW() WHERE id = $1', [approvalId]);
     
-    const users = await pool.query('SELECT id, first_name, last_name FROM users WHERE is_active = true ORDER BY id');
+    const users = await pool.query('SELECT id, first_name, last_name, telegram_id FROM users WHERE is_active = true ORDER BY id');
     
     const keyboard = users.rows.map(u => 
       [Markup.button.callback('💸 ' + safeString(u.first_name) + ' ' + safeString(u.last_name) + ' (на оплату)', 'payment_' + approvalId + '_' + u.id)]
@@ -720,8 +775,8 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
     const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
     const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approval.rows[0].creator_id]);
     
-    if (creator.rows.length > 0) {
-      await bot.telegram.sendMessage(creator.rows[0].telegram_id, '✅ Ваше согласование #' + approvalId + ' одобрено!');
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id && !isNaN(parseInt(creator.rows[0].telegram_id))) {
+      await sendNotification(creator.rows[0].telegram_id, '✅ Ваше согласование #' + approvalId + ' одобрено!');
     }
     
     await ctx.answerCbQuery();
@@ -741,19 +796,17 @@ bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
     const accountant = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [paymentToId]);
     const approval = await pool.query('SELECT * FROM approvals WHERE id = $1', [approvalId]);
     
-    if (accountant.rows.length > 0) {
-      await bot.telegram.sendMessage(
+    if (accountant.rows.length > 0 && accountant.rows[0].telegram_id && !isNaN(parseInt(accountant.rows[0].telegram_id))) {
+      await sendNotification(
         accountant.rows[0].telegram_id,
         '💰 Новый счёт на оплату #' + approvalId + '\n\n' +
         '📄 ' + approval.rows[0].title + '\n' +
         '💰 ' + approval.rows[0].amount + ' ₽\n' +
         '📝 ' + approval.rows[0].description + '\n\n' +
         '✅ Уже согласовано!',
-        {
-          reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Оплачено', 'paid_' + approvalId)]
-          ])
-        }
+        Markup.inlineKeyboard([
+          [Markup.button.callback('✅ Оплачено', 'paid_' + approvalId)]
+        ])
       );
     }
     
@@ -786,8 +839,8 @@ bot.action(/^paid_(\d+)/, async (ctx) => {
     const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
     const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
     
-    if (creator.rows.length > 0) {
-      await bot.telegram.sendMessage(creator.rows[0].telegram_id, '💰 Ваше согласование #' + approvalId + ' оплачено!');
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id && !isNaN(parseInt(creator.rows[0].telegram_id))) {
+      await sendNotification(creator.rows[0].telegram_id, '💰 Ваше согласование #' + approvalId + ' оплачено!');
     }
     
     await ctx.answerCbQuery();
@@ -805,8 +858,8 @@ bot.action(/^reject_(\d+)/, async (ctx) => {
     const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
     const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approval.rows[0].creator_id]);
     
-    if (creator.rows.length > 0) {
-      await bot.telegram.sendMessage(creator.rows[0].telegram_id, '❌ Ваше согласование #' + approvalId + ' отклонено.');
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id && !isNaN(parseInt(creator.rows[0].telegram_id))) {
+      await sendNotification(creator.rows[0].telegram_id, '❌ Ваше согласование #' + approvalId + ' отклонено.');
     }
     
     await ctx.answerCbQuery();
