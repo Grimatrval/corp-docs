@@ -832,6 +832,23 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
       );
     }
     
+    // ========== ОТПРАВЛЯЕМ КНОПКУ "ВЫПОЛНЕНО" ==========
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '✅ Выполнено', callback_data: 'task_completed_' + taskId }]
+      ]
+    };
+    
+    await ctx.telegram.sendMessage(ctx.from.id, 
+      '📋 Задача в работе\n\n' +
+      '📋 ' + task.rows[0].title + '\n' +
+      '📝 ' + task.rows[0].description + '\n' +
+      '📅 Срок: ' + new Date(task.rows[0].deadline).toLocaleDateString('ru-RU') + '\n\n' +
+      'Нажмите кнопку когда завершите:',
+      { reply_markup: keyboard }
+    );
+    // ========== КОНЕЦ ==========
+    
     await ctx.editMessageText('✅ Задача #' + taskId + ' принята в работу!\n\n📋 ' + task.rows[0].title);
     await ctx.answerCbQuery();
   } catch (e) {
