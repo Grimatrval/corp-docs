@@ -838,7 +838,8 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
     console.error('task_accept error:', e);
     ctx.answerCbQuery('Ошибка');
   }
-// Принятие задачи исполнителем
+});
+  // Принятие задачи исполнителем
 bot.action(/^task_accept_(\d+)/, async (ctx) => {
   try {
     const taskId = parseInt(ctx.match[1]);
