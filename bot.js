@@ -860,19 +860,31 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
     
     console.log('💸 Found users for payment:', users.rows.length);
     
-    // Создаём клавиатуру с пользователями
+    // Создаём клавиатуру с пользователями - ПРАВИЛЬНЫЙ ФОРМАТ
     const keyboard = [];
     users.rows.forEach(u => {
       const name = safeString(u.first_name) + ' ' + safeString(u.last_name);
-      keyboard.push([Markup.button.callback('💸 ' + name + ' (на оплату)', 'payment_' + approvalId + '_' + u.id)]);
+      keyboard.push([
+        {
+          text: '💸 ' + name + ' (на оплату)',
+          callback_data: 'payment_' + approvalId + '_' + u.id
+        }
+      ]);
     });
-    keyboard.push([Markup.button.callback('⏭ Пропустить', 'payment_skip_' + approvalId)]);
+    keyboard.push([
+      {
+        text: '⏭ Пропустить',
+        callback_data: 'payment_skip_' + approvalId
+      }
+    ]);
     
     console.log('💸 Created keyboard buttons:', keyboard.length);
     
-    // Отправляем сообщение с кнопками
+    // Отправляем сообщение с кнопками - ИСПРАВЛЕННЫЙ ФОРМАТ
     await ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId + '\n\nСогласование одобрено!\n\n💸 Отправить на оплату?\n\nВыберите получателя:', {
-      reply_markup: Markup.inlineKeyboard(keyboard)
+      reply_markup: {
+        inline_keyboard: keyboard
+      }
     });
     
     console.log('✅ Payment keyboard sent');
@@ -892,7 +904,6 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
     ctx.answerCbQuery('Ошибка');
   }
 });
-
 bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
