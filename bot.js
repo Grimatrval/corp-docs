@@ -855,17 +855,29 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
     
     await pool.query('UPDATE approvals SET status = \'approved\', updated_at = NOW() WHERE id = $1', [approvalId]);
     
+    // Получаем всех активных пользователей
     const users = await pool.query('SELECT id, first_name, last_name, telegram_id FROM users WHERE is_active = true ORDER BY id');
     
-    const keyboard = users.rows.map(u => 
-      [Markup.button.callback('💸 ' + safeString(u.first_name) + ' ' + safeString(u.last_name) + ' (на оплату)', 'payment_' + approvalId + '_' + u.id)]
-    );
+    console.log('💸 Found users for payment:', users.rows.length);
+    
+    // Создаём клавиатуру с пользователями
+    const keyboard = [];
+    users.rows.forEach(u => {
+      const name = safeString(u.first_name) + ' ' + safeString(u.last_name);
+      keyboard.push([Markup.button.callback('💸 ' + name + ' (на оплату)', 'payment_' + approvalId + '_' + u.id)]);
+    });
     keyboard.push([Markup.button.callback('⏭ Пропустить', 'payment_skip_' + approvalId)]);
     
+    console.log('💸 Created keyboard buttons:', keyboard.length);
+    
+    // Отправляем сообщение с кнопками
     await ctx.editMessageText('✅ СОГЛАСОВАНО #' + approvalId + '\n\nСогласование одобрено!\n\n💸 Отправить на оплату?\n\nВыберите получателя:', {
       reply_markup: Markup.inlineKeyboard(keyboard)
     });
     
+    console.log('✅ Payment keyboard sent');
+    
+    // Уведомляем создателя
     const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
     const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approval.rows[0].creator_id]);
     
@@ -876,6 +888,7 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('approve action error:', e);
+    console.error('Stack:', e.stack);
     ctx.answerCbQuery('Ошибка');
   }
 });
