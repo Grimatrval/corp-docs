@@ -410,9 +410,9 @@ bot.on('text', async (ctx) => {
         await ctx.telegram.sendMessage(ctx.chat.id, '🔥 Выберите приоритет:', {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🟢 Низкий', callback_ 'priority_low' }],
-              [{ text: '🟡 Средний', callback_ 'priority_medium' }],
-              [{ text: '🔴 Высокий', callback_ 'priority_high' }]
+              [{ text: '🟢 Низкий', callback_data: 'priority_low' }],
+              [{ text: '🟡 Средний', callback_data: 'priority_medium' }],
+              [{ text: '🔴 Высокий', callback_data: 'priority_high' }]
             ]
           }
         });
@@ -737,9 +737,9 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
           // Создаём inline keyboard
           const inlineKeyboard = {
             inline_keyboard: [
-              [{ text: '✅ Согласовать', callback_ 'approve_' + result.rows[0].id }],
-              [{ text: '❌ Отклонить', callback_ 'reject_' + result.rows[0].id }],
-              [{ text: '❓ Уточнить детали', callback_ 'clarify_' + result.rows[0].id }]
+              [{ text: '✅ Согласовать', callback_data: 'approve_' + result.rows[0].id }],
+              [{ text: '❌ Отклонить', callback_data: 'reject_' + result.rows[0].id }],
+              [{ text: '❓ Уточнить детали', callback_data: 'clarify_' + result.rows[0].id }]
             ]
           };
           
@@ -950,8 +950,8 @@ bot.action(/^priority_(\w+)/, async (ctx) => {
         
         const taskKeyboard = {
           inline_keyboard: [
-            [{ text: '✅ Принять в работу', callback_ 'task_accept_' + result.rows[0].id }],
-            [{ text: '❌ Отклонить', callback_ 'task_decline_' + result.rows[0].id }]
+            [{ text: '✅ Принять в работу', callback_data: 'task_accept_' + result.rows[0].id }],
+            [{ text: '❌ Отклонить', callback_data: 'task_decline_' + result.rows[0].id }]
           ]
         };
         
@@ -993,14 +993,14 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
       keyboard.push([
         {
           text: '💸 ' + name + ' (на оплату)',
-          callback_ 'payment_' + approvalId + '_' + u.id
+          callback_data: 'payment_' + approvalId + '_' + u.id
         }
       ]);
     });
     keyboard.push([
       {
         text: '⏭ Пропустить',
-        callback_ 'payment_skip_' + approvalId
+        callback_data: 'payment_skip_' + approvalId
       }
     ]);
     
@@ -1080,7 +1080,7 @@ bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
       // Отправляем кнопки ОТДЕЛЬНЫМ сообщением
       const keyboard = {
         inline_keyboard: [
-          [{ text: '✅ Оплачено', callback_ 'paid_' + approvalId }]
+          [{ text: '✅ Оплачено', callback_data: 'paid_' + approvalId }]
         ]
       };
       
