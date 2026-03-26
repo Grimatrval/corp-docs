@@ -838,6 +838,43 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
     console.error('task_accept error:', e);
     ctx.answerCbQuery('Ошибка');
   }
+// Принятие задачи исполнителем
+bot.action(/^task_accept_(\d+)/, async (ctx) => {
+  try {
+    const taskId = parseInt(ctx.match[1]);
+    
+    await pool.query('UPDATE tasks SET status = \'in_progress\' WHERE id = $1', [taskId]);
+    
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].creator_id]);
+    
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+      await sendNotification(
+        creator.rows[0].telegram_id,
+        '✅ Задача #' + taskId + ' принята в работу\n\n' +
+        '📋 ' + task.rows[0].title + '\n' +
+        '👤 Исполнитель начал работу'
+      );
+    }
+    
+    // ========== ДОБАВЛЯЕМ КНОПКУ "ВЫПОЛНЕНО" ==========
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '✅ Выполнено', callback_data: 'task_completed_' + taskId }]
+      ]
+    };
+    
+    await ctx.telegram.sendMessage(ctx.from.id, '📋 Задача в работе\n\n📋 ' + task.rows[0].title, {
+      reply_markup: keyboard
+    });
+    // ========== КОНЕЦ ==========
+    
+    await ctx.editMessageText('✅ Задача #' + taskId + ' принята в работу!\n\n📋 ' + task.rows[0].title);
+    await ctx.answerCbQuery();
+  } catch (e) {
+    console.error('task_accept error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
 });
 
 // Отклонение задачи исполнителем
