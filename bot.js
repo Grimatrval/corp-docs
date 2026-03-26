@@ -479,7 +479,7 @@ bot.on('text', async (ctx) => {
         await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
           '💬 Комментарий к оплате #' + approvalId + ':\n\n' +
           ctx.message.text + '\n\n' +
-          '👤 От бухгалтера'
+          '👤 От руководителя'
         );
       }
       
