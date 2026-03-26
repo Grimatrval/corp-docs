@@ -408,26 +408,76 @@ bot.on('text', async (ctx) => {
       console.log('⏰ Setting deadline:', text, 'User:', userId);
       userStates[userId] = { ...state, deadline: text, step: 'task_priority' };
       
-      const keyboard = Markup.inlineKeyboard([
-        [Markup.button.callback('🟢 Низкий', 'priority_low')],
-        [Markup.button.callback('🟡 Средний', 'priority_medium')],
-        [Markup.button.callback('🔴 Высокий', 'priority_high')]
-      ]);
+      try {
+        await ctx.telegram.sendMessage(ctx.chat.id, '🔥 Выберите приоритет:', {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: '🟢 Низкий', callback_data: 'priority_low' }],
+              [{ text: '🟡 Средний', callback_data: 'priority_medium' }],
+              [{ text: '🔴 Высокий', callback_data: 'priority_high' }]
+            ]
+          }
+        });
+        console.log('✅ Priority message sent');
+      } catch (e) {
+        console.error('❌ Error sending priority:', e.message);
+        await ctx.reply('🔥 Выберите приоритет текстом:\n\n1 - Низкий\n2 - Средний\n3 - Высокий');
+        userStates[userId].step = 'task_priority_text';
+      }
       
-      console.log('🔥 Showing priority keyboard for user:', userId);
-      
-      await ctx.reply('🔥 Выберите приоритет:', {
-        reply_markup: keyboard
-      });
-      
-      console.log('✅ Priority message sent');
       return;
     }
     
-  } catch (e) {
+    // Обработка выбора приоритета текстом (резервный вариант)
+    if (state?.step === 'task_priority_text') {
+      let priority = '';
+      
+      if (text === '1' || text.includes('Низкий')) {
+        priority = 'low';
+      } else if (text === '2' || text.includes('Средний')) {
+        priority = 'medium';
+      } else if (text === '3' || text.includes('Высокий')) {
+        priority = 'high';
+      } else {
+        return ctx.reply('❌ Выберите 1, 2 или 3');
+      }
+      
+      try {
+        const parts = state.deadline.split('.');
+        const deadline = parts[2] + '-' + parts[1] + '-' + parts[0];
+        
+        const result = await pool.query(
+          'INSERT INTO tasks (title, description, creator_id, executor_id, deadline, priority, status) VALUES ($1,$2,$3,$4,$5,$6,\'pending\') RETURNING *',
+          [state.title, state.description, user.id, state.executor_id, deadline, priority]
+        );
+        
+        delete userStates[userId];
+        
+        await ctx.reply('✅ Поручение #' + result.rows[0].id + ' создано!\n\n📋 ' + state.title + '\n📅 Срок: ' + state.deadline + '\n🔥 Приоритет: ' + priority, {
+          reply_markup: Markup.removeKeyboard()
+        });
+        
+        // Уведомление исполнителю
+        const executor = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [state.executor_id]);
+        if (executor.rows.length > 0 && executor.rows[0].telegram_id && !isNaN(parseInt(executor.rows[0].telegram_id))) {
+          await sendNotification(
+            executor.rows[0].telegram_id,
+            '🔔 Новое поручение #' + result.rows[0].id + '\n\n📋 ' + state.title + '\n🔥 Приоритет: ' + priority
+          );
+        }
+        
+      } catch (e) {
+        console.error('task creation error:', e);
+        ctx.reply('❌ Ошибка: ' + e.message);
+      }
+      
+      return;
+    }
+    
+  } catch (e) {  // ← ЭТОТ БЛОК БЫЛ ПРОПУЩЕН!
     console.error('text handler error:', e);
   }
-});// ========== ОБРАБОТКА ФАЙЛОВ ==========
+});  // ← И ЭТА СКОБКА!// ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 bot.on('document', async (ctx) => {
   const user = await checkAccess(ctx);
