@@ -856,24 +856,6 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
     ctx.answerCbQuery('Ошибка');
   }
 });
-  // Принятие задачи исполнителем
-bot.action(/^task_accept_(\d+)/, async (ctx) => {
-  try {
-    const taskId = parseInt(ctx.match[1]);
-    
-    await pool.query('UPDATE tasks SET status = \'in_progress\' WHERE id = $1', [taskId]);
-    
-    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
-    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].creator_id]);
-    
-    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
-      await sendNotification(
-        creator.rows[0].telegram_id,
-        '✅ Задача #' + taskId + ' принята в работу\n\n' +
-        '📋 ' + task.rows[0].title + '\n' +
-        '👤 Исполнитель начал работу'
-      );
-    }
     
     // ========== ДОБАВЛЯЕМ КНОПКУ "ВЫПОЛНЕНО" ==========
     const keyboard = {
