@@ -857,27 +857,7 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
   }
 });
     
-    // ========== ДОБАВЛЯЕМ КНОПКУ "ВЫПОЛНЕНО" ==========
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: '✅ Выполнено', callback_data: 'task_completed_' + taskId }]
-      ]
-    };
-    
-    await ctx.telegram.sendMessage(ctx.from.id, '📋 Задача в работе\n\n📋 ' + task.rows[0].title, {
-      reply_markup: keyboard
-    });
-    // ========== КОНЕЦ ==========
-    
-    await ctx.editMessageText('✅ Задача #' + taskId + ' принята в работу!\n\n📋 ' + task.rows[0].title);
-    await ctx.answerCbQuery();
-  } catch (e) {
-    console.error('task_accept error:', e);
-    ctx.answerCbQuery('Ошибка');
-  }
-});
-
-// Отклонение задачи исполнителем
+ // Отклонение задачи исполнителем
 bot.action(/^task_decline_(\d+)/, async (ctx) => {
   try {
     const taskId = parseInt(ctx.match[1]);
