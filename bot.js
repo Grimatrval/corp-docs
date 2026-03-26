@@ -494,62 +494,7 @@ bot.on('text', async (ctx) => {
   }
 });
   
-  delete userStates[telegramId];
-  await ctx.reply('✅ Комментарий отправлен!');
-  return;
-}
-    }
-    
-    // Обработка выбора приоритета текстом (резервный вариант)
-    if (state?.step === 'task_priority_text') {
-      let priority = '';
-      
-      if (text === '1' || text.includes('Низкий')) {
-        priority = 'low';
-      } else if (text === '2' || text.includes('Средний')) {
-        priority = 'medium';
-      } else if (text === '3' || text.includes('Высокий')) {
-        priority = 'high';
-      } else {
-        return ctx.reply('❌ Выберите 1, 2 или 3');
-      }
-      
-      try {
-        const parts = state.deadline.split('.');
-        const deadline = parts[2] + '-' + parts[1] + '-' + parts[0];
-        
-        const result = await pool.query(
-          'INSERT INTO tasks (title, description, creator_id, executor_id, deadline, priority, status) VALUES ($1,$2,$3,$4,$5,$6,\'pending\') RETURNING *',
-          [state.title, state.description, user.id, state.executor_id, deadline, priority]
-        );
-        
-        delete userStates[userId];
-        
-        await ctx.reply('✅ Поручение #' + result.rows[0].id + ' создано!\n\n📋 ' + state.title + '\n📅 Срок: ' + state.deadline + '\n🔥 Приоритет: ' + priority, {
-          reply_markup: Markup.removeKeyboard()
-        });
-        
-        // Уведомление исполнителю
-        const executor = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [state.executor_id]);
-        if (executor.rows.length > 0 && executor.rows[0].telegram_id && !isNaN(parseInt(executor.rows[0].telegram_id))) {
-          await sendNotification(
-            executor.rows[0].telegram_id,
-            '🔔 Новое поручение #' + result.rows[0].id + '\n\n📋 ' + state.title + '\n🔥 Приоритет: ' + priority
-          );
-        }
-        
-      } catch (e) {
-        console.error('task creation error:', e);
-        ctx.reply('❌ Ошибка: ' + e.message);
-      }
-      
-      return;
-    }
-    
-  } catch (e) {  // ← ЭТОТ БЛОК БЫЛ ПРОПУЩЕН!
-    console.error('text handler error:', e);
-  }
-});  // ← И ЭТА СКОБКА!// ========== ОБРАБОТКА ФАЙЛОВ ==========
+  // ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 bot.on('document', async (ctx) => {
   const user = await checkAccess(ctx);
