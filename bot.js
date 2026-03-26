@@ -48,7 +48,6 @@ bot.command('adduser', async (ctx) => {
     const firstName = args[2];
     const lastName = args[3];
     
-    // Пробуем получить chat_id по username
     try {
       const chat = await bot.telegram.getChat('@' + username);
       const telegramId = chat.id.toString();
@@ -177,7 +176,6 @@ bot.start(async (ctx) => {
       return;
     }
     
-    // Активируем пользователя если был неактивен
     if (!user.rows[0].is_active) {
       await pool.query('UPDATE users SET is_active = true WHERE telegram_id = $1', [telegramId]);
     }
@@ -348,8 +346,6 @@ bot.command('my_errands', async (ctx) => {
 
 // ========== ОБРАБОТКА ТЕКСТА ==========
 
-// ========== ОБРАБОТКА ТЕКСТА ==========
-
 bot.on('text', async (ctx) => {
   try {
     const text = ctx.message.text;
@@ -414,9 +410,9 @@ bot.on('text', async (ctx) => {
         await ctx.telegram.sendMessage(ctx.chat.id, '🔥 Выберите приоритет:', {
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🟢 Низкий', callback_data: 'priority_low' }],
-              [{ text: '🟡 Средний', callback_data: 'priority_medium' }],
-              [{ text: '🔴 Высокий', callback_data: 'priority_high' }]
+              [{ text: '🟢 Низкий', callback_ 'priority_low' }],
+              [{ text: '🟡 Средний', callback_ 'priority_medium' }],
+              [{ text: '🔴 Высокий', callback_ 'priority_high' }]
             ]
           }
         });
@@ -479,7 +475,7 @@ bot.on('text', async (ctx) => {
         await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
           '💬 Комментарий к оплате #' + approvalId + ':\n\n' +
           ctx.message.text + '\n\n' +
-          '👤 От руководителя'
+          '👤 От бухгалтера'
         );
       }
       
@@ -493,8 +489,8 @@ bot.on('text', async (ctx) => {
     console.error('text handler error:', e);
   }
 });
-  
-  // ========== ОБРАБОТКА ФАЙЛОВ ==========
+
+// ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 bot.on('document', async (ctx) => {
   const user = await checkAccess(ctx);
@@ -725,66 +721,67 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
       reply_markup: Markup.removeKeyboard()
     });
     
-  // ========== ОТПРАВКА УВЕДОМЛЕНИЯ СОГЛАСУЮЩЕМУ ==========
-const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
-if (approver.rows.length > 0) {
-  const telegramId = approver.rows[0].telegram_id;
-  
-  if (telegramId && !isNaN(parseInt(telegramId))) {
-    try {
-      const messageText = '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
-        '📄 ' + state.title + '\n' +
-        '💰 ' + state.amount + ' ₽\n' +
-        '📝 ' + state.description + '\n\n' +
-        '👤 От: ' + safeString(ctx.from.first_name);
+    // ========== ОТПРАВКА УВЕДОМЛЕНИЯ СОГЛАСУЮЩЕМУ ==========
+    const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
+    if (approver.rows.length > 0) {
+      const telegramId = approver.rows[0].telegram_id;
       
-      // Создаём inline keyboard
-      const inlineKeyboard = {
-        inline_keyboard: [
-          [{ text: '✅ Согласовать', callback_data: 'approve_' + result.rows[0].id }],
-          [{ text: '❌ Отклонить', callback_data: 'reject_' + result.rows[0].id }],
-          [{ text: '❓ Уточнить детали', callback_data: 'clarify_' + result.rows[0].id }]
-        ]
-      };
-      
-      // Отправляем файл (если есть)
-      if (state.file_id && state.file_type) {
-        if (state.file_type === 'photo') {
-          await bot.telegram.sendPhoto(telegramId, state.file_id, {
-            caption: messageText
-          });
-        } else if (state.file_type === 'document') {
-          await bot.telegram.sendDocument(telegramId, state.file_id, {
-            caption: messageText
-          });
-        } else if (state.file_type === 'voice') {
-          await bot.telegram.sendVoice(telegramId, state.file_id, {
-            caption: messageText
-          });
-        } else if (state.file_type === 'video_note') {
-          await bot.telegram.sendVideoNote(telegramId, state.file_id);
-          await bot.telegram.sendMessage(telegramId, messageText);
+      if (telegramId && !isNaN(parseInt(telegramId))) {
+        try {
+          const messageText = '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
+            '📄 ' + state.title + '\n' +
+            '💰 ' + state.amount + ' ₽\n' +
+            '📝 ' + state.description + '\n\n' +
+            '👤 От: ' + safeString(ctx.from.first_name);
+          
+          // Создаём inline keyboard
+          const inlineKeyboard = {
+            inline_keyboard: [
+              [{ text: '✅ Согласовать', callback_ 'approve_' + result.rows[0].id }],
+              [{ text: '❌ Отклонить', callback_ 'reject_' + result.rows[0].id }],
+              [{ text: '❓ Уточнить детали', callback_ 'clarify_' + result.rows[0].id }]
+            ]
+          };
+          
+          // Отправляем файл (если есть)
+          if (state.file_id && state.file_type) {
+            if (state.file_type === 'photo') {
+              await bot.telegram.sendPhoto(telegramId, state.file_id, {
+                caption: messageText
+              });
+            } else if (state.file_type === 'document') {
+              await bot.telegram.sendDocument(telegramId, state.file_id, {
+                caption: messageText
+              });
+            } else if (state.file_type === 'voice') {
+              await bot.telegram.sendVoice(telegramId, state.file_id, {
+                caption: messageText
+              });
+            } else if (state.file_type === 'video_note') {
+              await bot.telegram.sendVideoNote(telegramId, state.file_id);
+              await bot.telegram.sendMessage(telegramId, messageText);
+            }
+            
+            // Отправляем кнопки ОТДЕЛЬНЫМ сообщением
+            await bot.telegram.sendMessage(telegramId, '📋 Выберите действие:', {
+              reply_markup: inlineKeyboard
+            });
+          } else {
+            // Если файла нет — отправляем текст с кнопками
+            await bot.telegram.sendMessage(telegramId, messageText, {
+              reply_markup: inlineKeyboard
+            });
+          }
+          
+          console.log('✅ Notification with file and buttons sent to:', telegramId);
+        } catch (e) {
+          console.error('❌ Error sending notification:', e.message);
+          console.error('Stack:', e.stack);
         }
-        
-        // Отправляем кнопки ОТДЕЛЬНЫМ сообщением
-        await bot.telegram.sendMessage(telegramId, '📋 Выберите действие:', {
-          reply_markup: inlineKeyboard
-        });
-      } else {
-        // Если файла нет — отправляем текст с кнопками
-        await bot.telegram.sendMessage(telegramId, messageText, {
-          reply_markup: inlineKeyboard
-        });
       }
-      
-      console.log('✅ Notification with file and buttons sent to:', telegramId);
-    } catch (e) {
-      console.error('❌ Error sending notification:', e.message);
-      console.error('Stack:', e.stack);
     }
-  }
-}
-// ========== КОНЕЦ ОТПРАВКИ ==========
+    // ========== КОНЕЦ ОТПРАВКИ ==========
+    
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('approver action error:', e);
@@ -815,71 +812,7 @@ bot.action(/^executor_(\d+)/, async (ctx) => {
     ctx.answerCbQuery('Ошибка');
   }
 });
-bot.action(/^priority_(\w+)/, async (ctx) => {
-  try {
-    const userId = ctx.from.id;
-    const state = userStates[userId];
-    
-    if (!state || state.step !== 'task_priority') return;
-    
-    const priority = ctx.match[1];
-    const user = await checkAccess(ctx);
-    if (!user) return;
-    
-    const parts = state.deadline.split('.');
-    const deadline = parts[2] + '-' + parts[1] + '-' + parts[0];
-    
-    const result = await pool.query(
-      'INSERT INTO tasks (title, description, creator_id, executor_id, deadline, priority, status) VALUES ($1,$2,$3,$4,$5,$6,\'pending\') RETURNING *',
-      [state.title, state.description, user.id, state.executor_id, deadline, priority]
-    );
-    
-    delete userStates[userId];
-    
-    await ctx.reply('✅ Поручение #' + result.rows[0].id + ' создано!\n\n📋 ' + state.title + '\n📅 Срок: ' + state.deadline + '\n🔥 Приоритет: ' + priority, {
-      reply_markup: Markup.removeKeyboard()
-    });
-    
-    // ========== ОТПРАВКА УВЕДОМЛЕНИЯ ИСПОЛНИТЕЛЮ С КНОПКАМИ ==========
-    const executor = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [state.executor_id]);
-    if (executor.rows.length > 0) {
-      const telegramId = executor.rows[0].telegram_id;
-      
-      if (telegramId && !isNaN(parseInt(telegramId))) {
-        const taskMessage = '🔔 Новое поручение #' + result.rows[0].id + '\n\n' +
-          '📋 ' + state.title + '\n' +
-          '📝 ' + state.description + '\n' +
-          '📅 Срок: ' + state.deadline + '\n' +
-          '🔥 Приоритет: ' + priority + '\n\n' +
-          '👤 От: ' + safeString(ctx.from.first_name) + '\n\n' +
-          '📋 Выберите действие:';
-        
-        const taskKeyboard = {
-          inline_keyboard: [
-            [{ text: '✅ Принять в работу', callback_data: 'task_accept_' + result.rows[0].id }],
-            [{ text: '❌ Отклонить', callback_data: 'task_decline_' + result.rows[0].id }]
-          ]
-        };
-        
-        try {
-          await bot.telegram.sendMessage(telegramId, taskMessage, {
-            reply_markup: taskKeyboard
-          });
-          console.log('✅ Task notification with buttons sent to:', telegramId);
-        } catch (e) {
-          console.error('❌ Error sending task notification:', e);
-        }
-      }
-    }
-    // ========== КОНЕЦ ОТПРАВКИ ==========
-    
-    await ctx.answerCbQuery();
-  } catch (e) {
-    console.error('priority action error:', e);
-    ctx.reply('❌ Ошибка: ' + e.message);
-    ctx.answerCbQuery('Ошибка');
-  }
-});
+
 // Принятие задачи исполнителем
 bot.action(/^task_accept_(\d+)/, async (ctx) => {
   try {
@@ -976,6 +909,72 @@ bot.action(/^task_completed_(\d+)/, async (ctx) => {
   }
 });
 
+bot.action(/^priority_(\w+)/, async (ctx) => {
+  try {
+    const userId = ctx.from.id;
+    const state = userStates[userId];
+    
+    if (!state || state.step !== 'task_priority') return;
+    
+    const priority = ctx.match[1];
+    const user = await checkAccess(ctx);
+    if (!user) return;
+    
+    const parts = state.deadline.split('.');
+    const deadline = parts[2] + '-' + parts[1] + '-' + parts[0];
+    
+    const result = await pool.query(
+      'INSERT INTO tasks (title, description, creator_id, executor_id, deadline, priority, status) VALUES ($1,$2,$3,$4,$5,$6,\'pending\') RETURNING *',
+      [state.title, state.description, user.id, state.executor_id, deadline, priority]
+    );
+    
+    delete userStates[userId];
+    
+    await ctx.reply('✅ Поручение #' + result.rows[0].id + ' создано!\n\n📋 ' + state.title + '\n📅 Срок: ' + state.deadline + '\n🔥 Приоритет: ' + priority, {
+      reply_markup: Markup.removeKeyboard()
+    });
+    
+    // ========== ОТПРАВКА УВЕДОМЛЕНИЯ ИСПОЛНИТЕЛЮ С КНОПКАМИ ==========
+    const executor = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [state.executor_id]);
+    if (executor.rows.length > 0) {
+      const telegramId = executor.rows[0].telegram_id;
+      
+      if (telegramId && !isNaN(parseInt(telegramId))) {
+        const taskMessage = '🔔 Новое поручение #' + result.rows[0].id + '\n\n' +
+          '📋 ' + state.title + '\n' +
+          '📝 ' + state.description + '\n' +
+          '📅 Срок: ' + state.deadline + '\n' +
+          '🔥 Приоритет: ' + priority + '\n\n' +
+          '👤 От: ' + safeString(ctx.from.first_name) + '\n\n' +
+          '📋 Выберите действие:';
+        
+        const taskKeyboard = {
+          inline_keyboard: [
+            [{ text: '✅ Принять в работу', callback_ 'task_accept_' + result.rows[0].id }],
+            [{ text: '❌ Отклонить', callback_ 'task_decline_' + result.rows[0].id }]
+          ]
+        };
+        
+        try {
+          await bot.telegram.sendMessage(telegramId, taskMessage, {
+            reply_markup: taskKeyboard
+          });
+          console.log('✅ Task notification with buttons sent to:', telegramId);
+        } catch (e) {
+          console.error('❌ Error sending task notification:', e);
+        }
+      }
+    }
+    // ========== КОНЕЦ ОТПРАВКИ ==========
+    
+    await ctx.answerCbQuery();
+  } catch (e) {
+    console.error('priority action error:', e);
+    ctx.reply('❌ Ошибка: ' + e.message);
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
 bot.action(/^approve_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
@@ -994,14 +993,14 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
       keyboard.push([
         {
           text: '💸 ' + name + ' (на оплату)',
-          callback_data: 'payment_' + approvalId + '_' + u.id
+          callback_ 'payment_' + approvalId + '_' + u.id
         }
       ]);
     });
     keyboard.push([
       {
         text: '⏭ Пропустить',
-        callback_data: 'payment_skip_' + approvalId
+        callback_ 'payment_skip_' + approvalId
       }
     ]);
     
@@ -1031,6 +1030,7 @@ bot.action(/^approve_(\d+)/, async (ctx) => {
     ctx.answerCbQuery('Ошибка');
   }
 });
+
 bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
@@ -1080,7 +1080,7 @@ bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
       // Отправляем кнопки ОТДЕЛЬНЫМ сообщением
       const keyboard = {
         inline_keyboard: [
-          [{ text: '✅ Оплачено', callback_data: 'paid_' + approvalId }]
+          [{ text: '✅ Оплачено', callback_ 'paid_' + approvalId }]
         ]
       };
       
@@ -1106,6 +1106,7 @@ bot.action(/^payment_(\d+)_(\d+)/, async (ctx) => {
     ctx.answerCbQuery('Ошибка');
   }
 });
+
 bot.action(/^payment_skip_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
@@ -1173,7 +1174,9 @@ bot.action(/^cancel$/, async (ctx) => {
   delete userStates[ctx.from.id];
   await ctx.reply('❌ Отменено', { reply_markup: Markup.removeKeyboard() });
   await ctx.answerCbQuery();
-});// ========== ЗАПУСК ==========
+});
+
+// ========== ЗАПУСК ==========
 
 bot.launch().then(() => {
   console.log('✅ Бот запущен!');
