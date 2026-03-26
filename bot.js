@@ -708,61 +708,66 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
       reply_markup: Markup.removeKeyboard()
     });
     
-    // ========== ОТПРАВКА УВЕДОМЛЕНИЯ СОГЛАСУЮЩЕМУ С ФАЙЛОМ И КНОПКАМИ ==========
-    const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
-    if (approver.rows.length > 0) {
-      const telegramId = approver.rows[0].telegram_id;
+  // ========== ОТПРАВКА УВЕДОМЛЕНИЯ СОГЛАСУЮЩЕМУ ==========
+const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
+if (approver.rows.length > 0) {
+  const telegramId = approver.rows[0].telegram_id;
+  
+  if (telegramId && !isNaN(parseInt(telegramId))) {
+    try {
+      const messageText = '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
+        '📄 ' + state.title + '\n' +
+        '💰 ' + state.amount + ' ₽\n' +
+        '📝 ' + state.description + '\n\n' +
+        '👤 От: ' + safeString(ctx.from.first_name);
       
-      if (telegramId && !isNaN(parseInt(telegramId))) {
-        try {
-          const caption = '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
-            '📄 ' + state.title + '\n' +
-            '💰 ' + state.amount + ' ₽\n' +
-            '📝 ' + state.description + '\n\n' +
-            '👤 От: ' + safeString(ctx.from.first_name);
-          
-          const keyboard = Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Согласовать', 'approve_' + result.rows[0].id)],
-            [Markup.button.callback('❌ Отклонить', 'reject_' + result.rows[0].id)],
-            [Markup.button.callback('❓ Уточнить детали', 'clarify_' + result.rows[0].id)]
-          ]);
-          
-          // Отправляем в зависимости от типа файла
-          if (state.file_type === 'photo' && state.file_id) {
-            await bot.telegram.sendPhoto(telegramId, state.file_id, {
-              caption: caption,
-              reply_markup: keyboard
-            });
-          } else if (state.file_type === 'document' && state.file_id) {
-            await bot.telegram.sendDocument(telegramId, state.file_id, {
-              caption: caption,
-              reply_markup: keyboard
-            });
-          } else if (state.file_type === 'voice' && state.file_id) {
-            await bot.telegram.sendVoice(telegramId, state.file_id, {
-              caption: caption,
-              reply_markup: keyboard
-            });
-          } else if (state.file_type === 'video_note' && state.file_id) {
-            await bot.telegram.sendVideoNote(telegramId, state.file_id, {
-              caption: caption,
-              reply_markup: keyboard
-            });
-          } else {
-            // Если файла нет или тип не поддерживается
-            await bot.telegram.sendMessage(telegramId, caption, {
-              reply_markup: keyboard
-            });
-          }
-          
-          console.log('✅ Notification with file and buttons sent to:', telegramId);
-        } catch (e) {
-          console.error('❌ Error sending notification:', e.message);
+      // Создаём inline keyboard
+      const inlineKeyboard = {
+        inline_keyboard: [
+          [{ text: '✅ Согласовать', callback_data: 'approve_' + result.rows[0].id }],
+          [{ text: '❌ Отклонить', callback_data: 'reject_' + result.rows[0].id }],
+          [{ text: '❓ Уточнить детали', callback_data: 'clarify_' + result.rows[0].id }]
+        ]
+      };
+      
+      // Отправляем файл (если есть)
+      if (state.file_id && state.file_type) {
+        if (state.file_type === 'photo') {
+          await bot.telegram.sendPhoto(telegramId, state.file_id, {
+            caption: messageText
+          });
+        } else if (state.file_type === 'document') {
+          await bot.telegram.sendDocument(telegramId, state.file_id, {
+            caption: messageText
+          });
+        } else if (state.file_type === 'voice') {
+          await bot.telegram.sendVoice(telegramId, state.file_id, {
+            caption: messageText
+          });
+        } else if (state.file_type === 'video_note') {
+          await bot.telegram.sendVideoNote(telegramId, state.file_id);
+          await bot.telegram.sendMessage(telegramId, messageText);
         }
+        
+        // Отправляем кнопки ОТДЕЛЬНЫМ сообщением
+        await bot.telegram.sendMessage(telegramId, '📋 Выберите действие:', {
+          reply_markup: inlineKeyboard
+        });
+      } else {
+        // Если файла нет — отправляем текст с кнопками
+        await bot.telegram.sendMessage(telegramId, messageText, {
+          reply_markup: inlineKeyboard
+        });
       }
+      
+      console.log('✅ Notification with file and buttons sent to:', telegramId);
+    } catch (e) {
+      console.error('❌ Error sending notification:', e.message);
+      console.error('Stack:', e.stack);
     }
-    // ========== КОНЕЦ ОТПРАВКИ ==========
-    
+  }
+}
+// ========== КОНЕЦ ОТПРАВКИ ==========
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('approver action error:', e);
