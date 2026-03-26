@@ -416,23 +416,18 @@ bot.on('text', async (ctx) => {
       
       console.log('🔥 Showing priority keyboard for user:', userId);
       
-      try {
-        await ctx.reply('🔥 Выберите приоритет:', {
-          reply_markup: keyboard
-        });
-        console.log('✅ Priority message sent');
-      } catch (e) {
-        console.error('❌ Error sending priority keyboard:', e);
-      }
+      await ctx.reply('🔥 Выберите приоритет:', {
+        reply_markup: keyboard
+      });
       
+      console.log('✅ Priority message sent');
       return;
     }
+    
   } catch (e) {
     console.error('text handler error:', e);
   }
-});
-
-// ========== ОБРАБОТКА ФАЙЛОВ ==========
+});// ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 bot.on('document', async (ctx) => {
   const user = await checkAccess(ctx);
