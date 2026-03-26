@@ -708,29 +708,60 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
       reply_markup: Markup.removeKeyboard()
     });
     
-    // Отправляем уведомление согласующему
-    const approver = await pool.query('SELECT telegram_id, first_name, username FROM users WHERE id = $1', [approverId]);
+    // ========== ОТПРАВКА УВЕДОМЛЕНИЯ СОГЛАСУЮЩЕМУ С ФАЙЛОМ И КНОПКАМИ ==========
+    const approver = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approverId]);
     if (approver.rows.length > 0) {
       const telegramId = approver.rows[0].telegram_id;
       
-      // Проверяем что telegram_id это число
       if (telegramId && !isNaN(parseInt(telegramId))) {
-        await sendNotification(
-          telegramId,
-          '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
-          '📄 ' + state.title + '\n' +
-          '💰 ' + state.amount + ' ₽\n' +
-          '📝 ' + state.description + '\n\n' +
-          '👤 От: ' + safeString(ctx.from.first_name),
-          Markup.inlineKeyboard([
+        try {
+          const caption = '🔔 Новое согласование #' + result.rows[0].id + '\n\n' +
+            '📄 ' + state.title + '\n' +
+            '💰 ' + state.amount + ' ₽\n' +
+            '📝 ' + state.description + '\n\n' +
+            '👤 От: ' + safeString(ctx.from.first_name);
+          
+          const keyboard = Markup.inlineKeyboard([
             [Markup.button.callback('✅ Согласовать', 'approve_' + result.rows[0].id)],
-            [Markup.button.callback('❌ Отклонить', 'reject_' + result.rows[0].id)]
-          ])
-        );
-      } else {
-        console.log('⚠️ Cannot notify approver - invalid telegram_id:', telegramId);
+            [Markup.button.callback('❌ Отклонить', 'reject_' + result.rows[0].id)],
+            [Markup.button.callback('❓ Уточнить детали', 'clarify_' + result.rows[0].id)]
+          ]);
+          
+          // Отправляем в зависимости от типа файла
+          if (state.file_type === 'photo' && state.file_id) {
+            await bot.telegram.sendPhoto(telegramId, state.file_id, {
+              caption: caption,
+              reply_markup: keyboard
+            });
+          } else if (state.file_type === 'document' && state.file_id) {
+            await bot.telegram.sendDocument(telegramId, state.file_id, {
+              caption: caption,
+              reply_markup: keyboard
+            });
+          } else if (state.file_type === 'voice' && state.file_id) {
+            await bot.telegram.sendVoice(telegramId, state.file_id, {
+              caption: caption,
+              reply_markup: keyboard
+            });
+          } else if (state.file_type === 'video_note' && state.file_id) {
+            await bot.telegram.sendVideoNote(telegramId, state.file_id, {
+              caption: caption,
+              reply_markup: keyboard
+            });
+          } else {
+            // Если файла нет или тип не поддерживается
+            await bot.telegram.sendMessage(telegramId, caption, {
+              reply_markup: keyboard
+            });
+          }
+          
+          console.log('✅ Notification with file and buttons sent to:', telegramId);
+        } catch (e) {
+          console.error('❌ Error sending notification:', e.message);
+        }
       }
     }
+    // ========== КОНЕЦ ОТПРАВКИ ==========
     
     await ctx.answerCbQuery();
   } catch (e) {
@@ -926,13 +957,25 @@ bot.action(/^reject_(\d+)/, async (ctx) => {
   }
 });
 
+bot.action(/^clarify_(\d+)/, async (ctx) => {
+  try {
+    const approvalId = parseInt(ctx.match[1]);
+    
+    await ctx.reply('✏️ Напишите ваш вопрос или комментарий:');
+    userStates[ctx.from.id] = { step: 'clarify_message', approval_id: approvalId };
+    
+    await ctx.answerCbQuery();
+  } catch (e) {
+    console.error('clarify action error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
 bot.action(/^cancel$/, async (ctx) => {
   delete userStates[ctx.from.id];
   await ctx.reply('❌ Отменено', { reply_markup: Markup.removeKeyboard() });
   await ctx.answerCbQuery();
-});
-
-// ========== ЗАПУСК ==========
+});// ========== ЗАПУСК ==========
 
 bot.launch().then(() => {
   console.log('✅ Бот запущен!');
