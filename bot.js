@@ -463,27 +463,47 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-    // ========== ОБРАБОТКА КОММЕНТАРИЯ К ОПЛАТЕ ==========
-    if (state?.step === 'payment_comment') {
-      const approvalId = state.approval_id;
-      
-      // Отправляем комментарий создателю согласования
-      const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
-      const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
-      
-      if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
-        await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
-          '💬 Комментарий к оплате #' + approvalId + ':\n\n' +
-          ctx.message.text + '\n\n' +
-          '👤 От бухгалтера'
-        );
-      }
-      
-      delete userStates[userId];
-      await ctx.reply('✅ Комментарий отправлен!');
-      return;
-    }
-    // ========== КОНЕЦ ОБРАБОТКИ КОММЕНТАРИЯ ==========
+   // ========== ОБРАБОТКА КОММЕНТАРИЯ К ОПЛАТЕ ==========
+if (state?.step === 'payment_comment') {
+  const approvalId = state.approval_id;
+  
+  const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
+  const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+  
+  if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+    await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
+      '💬 Комментарий к оплате #' + approvalId + ':\n\n' +
+      ctx.message.text + '\n\n' +
+      '👤 От бухгалтера'
+    );
+  }
+  
+  delete userStates[userId];
+  await ctx.reply('✅ Комментарий отправлен!');
+  return;
+}
+
+// ========== ОБРАБОТКА УТОЧНЕНИЯ ДЕТАЛЕЙ ==========
+if (state?.step === 'clarify_message') {
+  const approvalId = state.approval_id;
+  
+  // Отправляем вопрос создателю согласования
+  const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
+  const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+  
+  if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+    await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
+      '❓ Уточнение по согласованию #' + approvalId + ':\n\n' +
+      '💬 ' + ctx.message.text + '\n\n' +
+      '👤 От согласующего'
+    );
+  }
+  
+  delete userStates[userId];
+  await ctx.reply('✅ Ваш вопрос отправлен создателю согласования!');
+  return;
+}
+// ========== КОНЕЦ ОБРАБОТКИ ==========
     
   } catch (e) {
     console.error('text handler error:', e);
@@ -1138,18 +1158,48 @@ bot.action(/^payment_skip_(\d+)/, async (ctx) => {
 bot.action(/^paid_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
-    await pool.query('UPDATE approvals SET status = \'paid\', payment_status = \'paid\' WHERE id = $1', [approvalId]);
-    await ctx.editMessageText('💰 ОПЛАЧЕНО #' + approvalId + '\n\nСчёт оплачен!');
     
-    const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
-    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+    // Обновляем статус
+    await pool.query('UPDATE approvals SET payment_status = \'paid\' WHERE id = $1', [approvalId]);
     
-    if (creator.rows.length > 0 && creator.rows[0].telegram_id && !isNaN(parseInt(creator.rows[0].telegram_id))) {
-      await sendNotification(creator.rows[0].telegram_id, '💰 Ваше согласование #' + approvalId + ' оплачено!');
-    }
+    // Отправляем кнопку "Выполнено" бухгалтеру
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '✅ Выполнено', callback_data 'payment_done_' + approvalId }]
+      ]
+    };
+    
+    await ctx.editMessageText('💰 ОПЛАЧЕНО #' + approvalId + '\n\nСчёт оплачен!\n\nНажмите "Выполнено" когда приложите платёжное поручение (опционально):', {
+      reply_markup: keyboard
+    });
     
     await ctx.answerCbQuery();
   } catch (e) {
+    console.error('paid action error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+// Новый обработчик для "Выполнено" после оплаты
+bot.action(/^payment_done_(\d+)/, async (ctx) => {
+  try {
+    const approvalId = parseInt(ctx.match[1]);
+    
+    // Обновляем общий статус
+    await pool.query('UPDATE approvals SET status = \'paid\' WHERE id = $1', [approvalId]);
+    
+    // Уведомляем создателя
+    const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
+    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+    
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+      await sendNotification(creator.rows[0].telegram_id, '💰 Согласование #' + approvalId + ' выполнено!\n\nСчёт оплачен, платёжное поручение приложено.');
+    }
+    
+    await ctx.editMessageText('✅ Согласование #' + approvalId + ' выполнено!\n\nСпасибо за работу!');
+    await ctx.answerCbQuery();
+  } catch (e) {
+    console.error('payment_done error:', e);
     ctx.answerCbQuery('Ошибка');
   }
 });
