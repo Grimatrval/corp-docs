@@ -346,6 +346,8 @@ bot.command('my_errands', async (ctx) => {
 
 // ========== ОБРАБОТКА ТЕКСТА ==========
 
+// ========== ОБРАБОТКА ТЕКСТА ==========
+
 bot.on('text', async (ctx) => {
   try {
     const text = ctx.message.text;
@@ -463,53 +465,129 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-   // ========== ОБРАБОТКА КОММЕНТАРИЯ К ОПЛАТЕ ==========
-if (state?.step === 'payment_comment') {
-  const approvalId = state.approval_id;
-  
-  const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
-  const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
-  
-  if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
-    await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
-      '💬 Комментарий к оплате #' + approvalId + ':\n\n' +
-      ctx.message.text + '\n\n' +
-      '👤 От бухгалтера'
-    );
-  }
-  
-  delete userStates[userId];
-  await ctx.reply('✅ Комментарий отправлен!');
-  return;
-}
-
-// ========== ОБРАБОТКА УТОЧНЕНИЯ ДЕТАЛЕЙ ==========
-if (state?.step === 'clarify_message') {
-  const approvalId = state.approval_id;
-  
-  // Отправляем вопрос создателю согласования
-  const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
-  const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [approval.rows[0].creator_id]);
-  
-  if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
-    await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
-      '❓ Уточнение по согласованию #' + approvalId + ':\n\n' +
-      '💬 ' + ctx.message.text + '\n\n' +
-      '👤 От согласующего'
-    );
-  }
-  
-  delete userStates[userId];
-  await ctx.reply('✅ Ваш вопрос отправлен создателю согласования!');
-  return;
-}
-// ========== КОНЕЦ ОБРАБОТКИ ==========
+    // ========== ОБРАБОТКА КОММЕНТАРИЯ К ОПЛАТЕ ==========
+    if (state?.step === 'payment_comment') {
+      const approvalId = state.approval_id;
+      
+      const approval = await pool.query('SELECT creator_id FROM approvals WHERE id = $1', [approvalId]);
+      const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approval.rows[0].creator_id]);
+      
+      if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+        await bot.telegram.sendMessage(creator.rows[0].telegram_id, 
+          '💬 Комментарий к оплате #' + approvalId + ':\n\n' +
+          ctx.message.text + '\n\n' +
+          '👤 От бухгалтера'
+        );
+      }
+      
+      delete userStates[userId];
+      await ctx.reply('✅ Комментарий отправлен!');
+      return;
+    }
+    
+    // ========== ОБРАБОТКА УТОЧНЕНИЯ ДЕТАЛЕЙ (вопрос от согласующего) ==========
+    if (state?.step === 'clarify_message') {
+      const approvalId = state.approval_id;
+      
+      // Получаем информацию о согласовании
+      const approval = await pool.query('SELECT creator_id, approver_id, file_id, file_type, title, amount, description FROM approvals WHERE id = $1', [approvalId]);
+      
+      if (approval.rows.length > 0) {
+        const creatorId = approval.rows[0].creator_id;
+        const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [creatorId]);
+        
+        if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+          // Отправляем инициатору вопрос + кнопки
+          const questionText = '❓ Уточнение по согласованию #' + approvalId + ':\n\n' +
+            '💬 ' + ctx.message.text + '\n\n' +
+            '👤 От согласующего';
+          
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: '✏️ Ответить', callback_data: 'clarify_reply_' + approvalId }],
+              [{ text: '❌ Отменить согласование', callback_data: 'clarify_cancel_' + approvalId }]
+            ]
+          };
+          
+          await bot.telegram.sendMessage(creator.rows[0].telegram_id, questionText, {
+            reply_markup: keyboard
+          });
+        }
+      }
+      
+      delete userStates[userId];
+      await ctx.reply('✅ Ваш вопрос отправлен инициатору согласования!');
+      return;
+    }
+    
+    // ========== ОБРАБОТКА ОТВЕТА ИНИЦИАТОРА НА УТОЧНЕНИЕ ==========
+    if (state?.step === 'clarify_reply_message') {
+      const approvalId = state.approval_id;
+      
+      // Получаем информацию о согласовании
+      const approval = await pool.query('SELECT approver_id, file_id, file_type, title, amount, description FROM approvals WHERE id = $1', [approvalId]);
+      
+      if (approval.rows.length > 0) {
+        const approverId = approval.rows[0].approver_id;
+        const approver = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [approverId]);
+        
+        if (approver.rows.length > 0 && approver.rows[0].telegram_id) {
+          const telegramId = approver.rows[0].telegram_id;
+          
+          // Формируем текст ответа
+          const replyText = '✏️ Ответ на уточнение #' + approvalId + ':\n\n' +
+            '💬 ' + ctx.message.text + '\n\n' +
+            '👤 От инициатора\n\n' +
+            '📋 Продолжить согласование?';
+          
+          // Создаём кнопки для согласующего
+          const inlineKeyboard = {
+            inline_keyboard: [
+              [{ text: '✅ Согласовать', callback_data: 'approve_' + approvalId }],
+              [{ text: '❌ Отклонить', callback_data: 'reject_' + approvalId }],
+              [{ text: '❓ Уточнить детали', callback_data: 'clarify_' + approvalId }]
+            ]
+          };
+          
+          // Отправляем файл (если есть)
+          if (approval.rows[0].file_id && approval.rows[0].file_type) {
+            if (approval.rows[0].file_type === 'photo') {
+              await bot.telegram.sendPhoto(telegramId, approval.rows[0].file_id, {
+                caption: replyText
+              });
+            } else if (approval.rows[0].file_type === 'document') {
+              await bot.telegram.sendDocument(telegramId, approval.rows[0].file_id, {
+                caption: replyText
+              });
+            } else if (approval.rows[0].file_type === 'voice') {
+              await bot.telegram.sendVoice(telegramId, approval.rows[0].file_id, {
+                caption: replyText
+              });
+            }
+            
+            // Отправляем кнопки отдельным сообщением
+            await bot.telegram.sendMessage(telegramId, '📋 Выберите действие:', {
+              reply_markup: inlineKeyboard
+            });
+          } else {
+            // Если файла нет
+            await bot.telegram.sendMessage(telegramId, replyText, {
+              reply_markup: inlineKeyboard
+            });
+          }
+        }
+      }
+      
+      delete userStates[userId];
+      await ctx.reply('✅ Ваш ответ отправлен согласующему!');
+      return;
+    }
+    // ========== КОНЕЦ ОБРАБОТКИ ==========
     
   } catch (e) {
     console.error('text handler error:', e);
   }
 });
-
 // ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 bot.on('document', async (ctx) => {
@@ -1235,12 +1313,6 @@ bot.action(/^clarify_(\d+)/, async (ctx) => {
     console.error('clarify action error:', e);
     ctx.answerCbQuery('Ошибка');
   }
-});
-
-bot.action(/^cancel$/, async (ctx) => {
-  delete userStates[ctx.from.id];
-  await ctx.reply('❌ Отменено', { reply_markup: Markup.removeKeyboard() });
-  await ctx.answerCbQuery();
 });
 
 // ========== ЗАПУСК ==========
