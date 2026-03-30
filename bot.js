@@ -946,7 +946,6 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
   }  
 });
 
-    
 // Ответ на уточнение от инициатора
 bot.action(/^clarify_reply_(\d+)/, async (ctx) => {
   try {
