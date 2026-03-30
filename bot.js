@@ -812,7 +812,6 @@ bot.action(/^executor_(\d+)/, async (ctx) => {
     ctx.answerCbQuery('Ошибка');
   }
 });
-
 // Принятие задачи исполнителем
 bot.action(/^task_accept_(\d+)/, async (ctx) => {
   try {
@@ -823,6 +822,7 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
     const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
     const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].creator_id]);
     
+    // Уведомляем создателя
     if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
       await sendNotification(
         creator.rows[0].telegram_id,
@@ -832,7 +832,7 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
       );
     }
     
-    // ========== ОТПРАВЛЯЕМ КНОПКУ "ВЫПОЛНЕНО" ==========
+    // ========== ОТПРАВЛЯЕМ КНОПКУ "ВЫПОЛНЕНО" ИСПОЛНИТЕЛЮ ==========
     const keyboard = {
       inline_keyboard: [
         [{ text: '✅ Выполнено', callback_data: 'task_completed_' + taskId }]
@@ -854,10 +854,10 @@ bot.action(/^task_accept_(\d+)/, async (ctx) => {
   } catch (e) {
     console.error('task_accept error:', e);
     ctx.answerCbQuery('Ошибка');
-  }
+  }  
 });
-    
- // Отклонение задачи исполнителем
+
+    // Отклонение задачи исполнителем
 bot.action(/^task_decline_(\d+)/, async (ctx) => {
   try {
     const taskId = parseInt(ctx.match[1]);
