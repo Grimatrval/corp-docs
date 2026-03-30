@@ -1165,7 +1165,7 @@ bot.action(/^paid_(\d+)/, async (ctx) => {
     // Отправляем кнопку "Выполнено" бухгалтеру
     const keyboard = {
       inline_keyboard: [
-        [{ text: '✅ Выполнено', callback_data 'payment_done_' + approvalId }]
+        [{ text: '✅ Выполнено', callback_data: 'payment_done_' + approvalId }]
       ]
     };
     
