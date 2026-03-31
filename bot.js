@@ -777,9 +777,26 @@ bot.on('document', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
   
+  const state = userStates[ctx.from.id];
+  
+  // ========== ОБРАБОТКА ФАЙЛА ПЛАТЁЖНОГО ПОРУЧЕНИЯ ==========
+  if (state?.step === 'payment_receipt_file') {
+    const approvalId = state.approval_id;
+    const fileId = ctx.message.document.file_id;
+    const fileType = 'document';
+    
+    // Отправляем ПП инициатору и согласующему
+    await sendPaymentCompleteNotification(approvalId, true, fileId, fileType);
+    
+    delete userStates[ctx.from.id];
+    return ctx.reply('✅ Спасибо за выполненную работу!');
+  }
+  // ========== КОНЕЦ ОБРАБОТКИ ПП ==========
+  
   const caption = ctx.message.caption || '';
   const fileId = ctx.message.document.file_id;
   const fileName = ctx.message.document.file_name;
+  
   
   if (caption.toLowerCase().includes('согласование:') || caption.toLowerCase().includes('согласуй:')) {
     await createApprovalFromFile(ctx, caption, fileId, fileName, 'document');
@@ -797,6 +814,22 @@ bot.on('photo', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
   
+  const state = userStates[ctx.from.id];
+  
+  // ========== ОБРАБОТКА ФОТО ПЛАТЁЖНОГО ПОРУЧЕНИЯ ==========
+  if (state?.step === 'payment_receipt_file') {
+    const approvalId = state.approval_id;
+    const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+    const fileType = 'photo';
+    
+    // Отправляем ПП инициатору и согласующему
+    await sendPaymentCompleteNotification(approvalId, true, fileId, fileType);
+    
+    delete userStates[ctx.from.id];
+    return ctx.reply('✅ Спасибо за выполненную работу!');
+  }
+  // ========== КОНЕЦ ОБРАБОТКИ ПП ==========
+  
   const caption = ctx.message.caption || '';
   const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
   
@@ -810,6 +843,20 @@ bot.on('photo', async (ctx) => {
     userStates[ctx.from.id] = { ...state, file_id: fileId, file_type: 'photo', step: 'approval_approver_list' };
     return showApproverList(ctx, userStates[ctx.from.id]);
   }
+  // ========== ОБРАБОТКА ОТВЕТА НА ПРИКРЕПЛЕНИЕ ПП ==========
+if (state?.step === 'payment_receipt_file') {
+  const approvalId = state.approval_id;
+  
+  // Если пользователь написал "нет"
+  if (text.toLowerCase() === 'нет') {
+    await sendPaymentCompleteNotification(approvalId, false);
+    delete userStates[userId];
+    return ctx.reply('✅ Спасибо за выполненную работу!');
+  }
+  
+  // Иначе ждём файл (обработается в bot.on('document') или bot.on('photo'))
+  return;
+}
 });
 
 // ========== CALLBACK QUERY ==========
@@ -1159,18 +1206,16 @@ bot.action(/^paid_(\d+)/, async (ctx) => {
   try {
     const approvalId = parseInt(ctx.match[1]);
     
+    // Обновляем статус
     await pool.query('UPDATE approvals SET payment_status = \'paid\' WHERE id = $1', [approvalId]);
     
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: '✅ Выполнено', callback_data: 'payment_done_' + approvalId }]
-      ]
+    // Сохраняем состояние для получения ПП
+    userStates[ctx.from.id] = {
+      step: 'payment_receipt_file',
+      approval_id: approvalId
     };
     
-    await ctx.editMessageText('💰 ОПЛАЧЕНО #' + approvalId + '\n\nСчёт оплачен!\n\nНажмите "Выполнено" когда приложите платёжное поручение (опционально):', {
-      reply_markup: keyboard
-    });
-    
+    await ctx.editMessageText('💰 ОПЛАЧЕНО #' + approvalId + '\n\nСчёт оплачен!\n\n📎 *Прикрепите платёжное поручение*\n\nОтправьте файл (PDF, фото) или напишите "нет" чтобы пропустить');
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('paid action error:', e);
@@ -1178,63 +1223,6 @@ bot.action(/^paid_(\d+)/, async (ctx) => {
   }
 });
 
-bot.action(/^payment_done_(\d+)/, async (ctx) => {
-  try {
-    const approvalId = parseInt(ctx.match[1]);
-    
-    userStates[ctx.from.id] = {
-      step: 'payment_receipt_answer',
-      approval_id: approvalId
-    };
-    
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: '✅ ДА, прикрепить', callback_data: 'payment_receipt_yes_' + approvalId }],
-        [{ text: '❌ НЕТ, без ПП', callback_data: 'payment_receipt_no_' + approvalId }]
-      ]
-    };
-    
-    await ctx.editMessageText('💰 Согласование #' + approvalId + ' выполнено!\n\n📎 *Хотите прикрепить платёжное поручение?*\n\nФайл будет отправлен инициатору и согласующему.', {
-      reply_markup: keyboard
-    });
-    
-    await ctx.answerCbQuery();
-  } catch (e) {
-    console.error('payment_done error:', e);
-    ctx.answerCbQuery('Ошибка');
-  }
-});
-
-bot.action(/^payment_receipt_yes_(\d+)/, async (ctx) => {
-  try {
-    const approvalId = parseInt(ctx.match[1]);
-    
-    userStates[ctx.from.id] = {
-      step: 'payment_receipt_file',
-      approval_id: approvalId
-    };
-    
-    await ctx.editMessageText('📎 Прикрепите платёжное поручение:\n\nОтправьте файл (PDF, фото, документ)');
-    await ctx.answerCbQuery();
-  } catch (e) {
-    ctx.answerCbQuery('Ошибка');
-  }
-});
-
-bot.action(/^payment_receipt_no_(\d+)/, async (ctx) => {
-  try {
-    const approvalId = parseInt(ctx.match[1]);
-    
-    await sendPaymentCompleteNotification(approvalId, false);
-    
-    await ctx.editMessageText('✅ Оплата подтверждена без платёжного поручения\n\nУведомление отправлено инициатору и согласующему.');
-    await ctx.answerCbQuery();
-    
-    delete userStates[ctx.from.id];
-  } catch (e) {
-    ctx.answerCbQuery('Ошибка');
-  }
-});
 
 bot.action(/^reject_(\d+)/, async (ctx) => {
   try {
