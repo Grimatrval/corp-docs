@@ -752,18 +752,18 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-    // ========== ОБРАБОТКА ФАЙЛА ПЛАТЁЖНОГО ПОРУЧЕНИЯ ==========
-    if (state?.step === 'payment_receipt_file') {
+    // ========== ОБРАБОТКА ОТВЕТА НА ПРИКРЕПЛЕНИЕ ПП ==========
+    if (state?.step === 'payment_receipt_answer') {
       const approvalId = state.approval_id;
-      const fileId = ctx.message.document?.file_id || ctx.message.photo?.[ctx.message.photo.length - 1]?.file_id;
-      const fileType = ctx.message.document ? 'document' : 'photo';
       
-      if (fileId) {
-        await sendPaymentCompleteNotification(approvalId, true, fileId, fileType);
-        delete userStates[userId];
-        return ctx.reply('✅ Платёжное поручение отправлено!');
+      if (text.toLowerCase() === 'да' || text === '✅') {
+        userStates[userId] = { ...state, step: 'payment_receipt_file' };
+        return ctx.reply('📎 Прикрепите платёжное поручение:\n\nОтправьте файл (PDF, фото, документ)');
       } else {
-        return ctx.reply('❌ Не удалось получить файл. Попробуйте ещё раз или напишите "нет" для отмены');
+        // Отправляем уведомление без ПП
+        await sendPaymentCompleteNotification(approvalId, false);
+        delete userStates[userId];
+        return ctx.reply('✅ Оплата подтверждена без платёжного поручения!');
       }
     }
     
@@ -771,7 +771,6 @@ bot.on('text', async (ctx) => {
     console.error('text handler error:', e);
   }
 });
-
 // ========== ОБРАБОТКА ФАЙЛОВ ==========
 
 bot.on('document', async (ctx) => {
