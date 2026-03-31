@@ -104,7 +104,8 @@ bot.command('removeuser', async (ctx) => {
       'UPDATE users SET is_active = false WHERE (username = $1 OR id = $2) AND role != \'admin\' RETURNING *',
       [identifier, parseInt(identifier) || 0]
     );
-    
+
+  
     if (result.rows.length > 0) {
       ctx.reply('✅ Пользователь деактивирован:\n' + safeString(result.rows[0].first_name) + ' ' + safeString(result.rows[0].last_name));
     } else {
