@@ -5,7 +5,125 @@ const { Pool } = require('pg');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const userStates = {};
+const cron = require('node-cron');
 
+// ========== СИСТЕМА УВЕДОМЛЕНИЙ О СРОКАХ ==========
+
+// Запускаем проверку в 10:00 и 17:00 по Москве
+cron.schedule('0 10 * * *', () => {
+  console.log('🔔 Running deadline check (10:00 MSK)...');
+  checkTaskDeadlines();
+}, {
+  timezone: 'Europe/Moscow'
+});
+
+cron.schedule('0 17 * * *', () => {
+  console.log('🔔 Running deadline check (17:00 MSK)...');
+  checkTaskDeadlines();
+}, {
+  timezone: 'Europe/Moscow'
+});
+
+async function checkTaskDeadlines() {
+  try {
+    const now = new Date();
+    
+    // Находим все незавершенные задачи
+    const tasks = await pool.query(`
+      SELECT t.*, 
+             u_creator.telegram_id as creator_telegram_id,
+             u_creator.first_name as creator_name,
+             u_executor.telegram_id as executor_telegram_id,
+             u_executor.first_name as executor_name
+      FROM tasks t
+      LEFT JOIN users u_creator ON t.creator_id = u_creator.id
+      LEFT JOIN users u_executor ON t.executor_id = u_executor.id
+      WHERE t.status != 'completed' 
+        AND t.status != 'declined'
+      ORDER BY t.deadline ASC
+    `);
+    
+    if (tasks.rows.length === 0) {
+      console.log('✅ No active tasks to check');
+      return;
+    }
+    
+    console.log(`📋 Found ${tasks.rows.length} active tasks`);
+    
+    for (const task of tasks.rows) {
+      if (!task.deadline) continue;
+      
+      const deadline = new Date(task.deadline);
+      const daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
+      
+      let notificationText = '';
+      let shouldNotify = false;
+      
+      // Просроченные задачи
+      if (daysLeft < 0) {
+        notificationText = `⚠️ ПРОСРОЧЕНО поручение #${task.id}\n\n` +
+          `📋 ${task.title}\n` +
+          `📅 Срок был: ${deadline.toLocaleDateString('ru-RU')}\n` +
+          `⏰ Просрочено на: ${Math.abs(daysLeft)} дн.\n` +
+          `👤 Исполнитель: ${safeString(task.executor_name)}\n\n` +
+          `Пожалуйста, выполните задачу как можно скорее!`;
+        shouldNotify = true;
+      }
+      // Задачи, истекающие сегодня
+      else if (daysLeft === 0) {
+        notificationText = `⏰ СЕГОДНЯ срок поручения #${task.id}\n\n` +
+          `📋 ${task.title}\n` +
+          `📅 Срок: сегодня (${deadline.toLocaleDateString('ru-RU')})\n` +
+          `👤 Исполнитель: ${safeString(task.executor_name)}\n\n` +
+          `Не забудьте выполнить задачу сегодня!`;
+        shouldNotify = true;
+      }
+      // Задачи, истекающие завтра
+      else if (daysLeft === 1) {
+        notificationText = `🔔 ЗАВТРА срок поручения #${task.id}\n\n` +
+          `📋 ${task.title}\n` +
+          `📅 Срок: завтра (${deadline.toLocaleDateString('ru-RU')})\n` +
+          `👤 Исполнитель: ${safeString(task.executor_name)}\n\n` +
+          `Остался 1 день!`;
+        shouldNotify = true;
+      }
+      // Задачи, истекающие через 3 дня
+      else if (daysLeft === 3) {
+        notificationText = `📌 Напоминание о поручении #${task.id}\n\n` +
+          `📋 ${task.title}\n` +
+          `📅 Срок: ${deadline.toLocaleDateString('ru-RU')}\n` +
+          `⏱ Осталось: 3 дня\n` +
+          `👤 Исполнитель: ${safeString(task.executor_name)}`;
+        shouldNotify = true;
+      }
+      
+      if (shouldNotify) {
+        // Отправляем инициатору
+        if (task.creator_telegram_id) {
+          try {
+            await bot.telegram.sendMessage(task.creator_telegram_id, notificationText);
+            console.log(`✅ Notification sent to creator ${task.creator_telegram_id} for task #${task.id}`);
+          } catch (e) {
+            console.error(`❌ Failed to notify creator ${task.creator_telegram_id}:`, e.message);
+          }
+        }
+        
+        // Отправляем исполнителю
+        if (task.executor_telegram_id) {
+          try {
+            await bot.telegram.sendMessage(task.executor_telegram_id, notificationText);
+            console.log(`✅ Notification sent to executor ${task.executor_telegram_id} for task #${task.id}`);
+          } catch (e) {
+            console.error(`❌ Failed to notify executor ${task.executor_telegram_id}:`, e.message);
+          }
+        }
+      }
+    }
+    
+  } catch (e) {
+    console.error('checkTaskDeadlines error:', e);
+  }
+}
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
 function safeString(str) {
