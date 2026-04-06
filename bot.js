@@ -848,7 +848,6 @@ if (state?.step === 'task_receipt_file') {
   // Иначе ждём файл (обработается в bot.on('document') или bot.on('photo'))
   return;
 }
-});
 
 // ========== ОБРАБОТКА ФАЙЛОВ ==========
 
