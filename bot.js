@@ -1,3 +1,4 @@
+
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { Pool } = require('pg');
@@ -828,21 +829,26 @@ bot.on('text', async (ctx) => {
       }
     }
     
-    // ========== ОБРАБОТКА ОТВЕТА НА ПРИКРЕПЛЕНИЕ ФАЙЛА К ЗАДАЧЕ ==========
-    if (state?.step === 'task_receipt_file') {
-      const taskId = state.task_id;
-      if (text.toLowerCase() === 'нет') {
-        const executorName = safeString(ctx.from.first_name);
-        await sendTaskCompletionNotification(taskId, false, null, null, executorName);
-        delete userStates[userId];
-        return ctx.reply('✅ Спасибо за выполнение поручения!');
-      }
-      return;
-    }
+   // ========== ОБРАБОТКА ОТВЕТА НА ПРИКРЕПЛЕНИЕ ФАЙЛА К ЗАДАЧЕ ==========
+if (state?.step === 'task_receipt_file') {
+  const taskId = state.task_id;
+  
+  if (text.toLowerCase() === 'нет') {
+    // ✅ ОБНОВЛЯЕМ статус задачи на completed
+    await pool.query(
+      'UPDATE tasks SET status = \'completed\', completed_at = NOW() WHERE id = $1',
+      [taskId]
+    );
     
-  } catch (e) {
-    console.error('text handler error:', e);
+    const executorName = safeString(ctx.from.first_name);
+    await sendTaskCompletionNotification(taskId, false, null, null, executorName);
+    delete userStates[userId];
+    return ctx.reply('✅ Спасибо за выполнение поручения!');
   }
+  
+  // Иначе ждём файл (обработается в bot.on('document') или bot.on('photo'))
+  return;
+}
 });
 
 // ========== ОБРАБОТКА ФАЙЛОВ ==========
