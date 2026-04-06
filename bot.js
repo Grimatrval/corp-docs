@@ -488,21 +488,42 @@ bot.command('my_tasks', async (ctx) => {
   
   try {
     const result = await pool.query(
-      'SELECT t.*, u.first_name as creator_name FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE t.executor_id = $1 AND t.status != \'completed\' ORDER BY t.deadline ASC',
+      'SELECT t.*, u.first_name as creator_name FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE t.executor_id = $1 AND t.status = \'in_progress\' ORDER BY t.deadline ASC',
       [user.id]
     );
     
     if (result.rows.length === 0) {
-      return ctx.reply('📭 У вас нет активных задач');
+      return ctx.reply('📭 У вас нет задач в работе');
     }
     
-    // Сохраняем задачи и текущую страницу в состоянии
-    userStates[ctx.from.id] = {
-      step: 'my_tasks_list',
-      tasks: result.rows,
-      page: 0
-    };
+    let message = '📋 Мои задачи в работе:\n\n';
+    const keyboard = [];
     
+    result.rows.forEach((t, i) => {
+      const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
+      message += `${i + 1}. ${emoji} ${t.title}\n`;
+      message += `   📅 До: ${new Date(t.deadline).toLocaleDateString('ru-RU')}\n`;
+      message += `   📌 ${t.status}\n`;
+      message += `   👤 ${safeString(t.creator_name)}\n\n`;
+      
+      // Кнопки для каждой задачи
+      keyboard.push([
+        { text: `✅ #${i + 1}`, callback_data: `task_complete_from_list_${t.id}` },
+        { text: `❌ #${i + 1}`, callback_data: `task_decline_from_list_${t.id}` }
+      ]);
+    });
+    
+    ctx.reply(message, {
+      reply_markup: {
+        inline_keyboard: keyboard
+      }
+    });
+  } catch (e) {
+    console.error('my_tasks error:', e);
+    ctx.reply('❌ Ошибка: ' + e.message);
+  }
+});
+
     await showTaskPage(ctx, 0);
     
   } catch (e) {
