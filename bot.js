@@ -1180,6 +1180,8 @@ bot.action(/^clarify_cancel_(\d+)/, async (ctx) => {
     console.error('clarify_cancel error:', e);
     ctx.answerCbQuery('Ошибка');
   }
+ });
+
   // ========== БЫСТРОЕ ВЫПОЛНЕНИЕ ИЗ СПИСКА ==========
 bot.action(/^task_complete_from_list_(\d+)/, async (ctx) => {
   try {
