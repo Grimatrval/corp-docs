@@ -485,23 +485,39 @@ bot.command('new_task', async (ctx) => {
 bot.command('my_tasks', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
+  
   try {
     const result = await pool.query(
       'SELECT t.*, u.first_name as creator_name FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE t.executor_id = $1 AND t.status != \'completed\' ORDER BY t.deadline ASC',
       [user.id]
     );
+    
     if (result.rows.length === 0) {
       return ctx.reply('📭 У вас нет активных задач');
     }
+    
     let message = '📋 Ваши активные задачи:\n\n';
+    const keyboard = [];
+    
     result.rows.forEach((t, i) => {
       const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
       message += (i+1) + '. ' + emoji + ' ' + t.title + '\n';
       message += '   📅 До: ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
       message += '   📌 ' + t.status + '\n';
       message += '   👤 ' + safeString(t.creator_name) + '\n\n';
+      
+      // Добавляем кнопки для каждой задачи
+      keyboard.push([
+        { text: '✅ Выполнено', callback_data: 'task_complete_from_list_' + t.id },
+        { text: '❌ Отклонить', callback_data: 'task_decline_from_list_' + t.id }
+      ]);
     });
-    ctx.reply(message);
+    
+    ctx.reply(message, {
+      reply_markup: {
+        inline_keyboard: keyboard
+      }
+    });
   } catch (e) {
     console.error('my_tasks error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
@@ -511,23 +527,40 @@ bot.command('my_tasks', async (ctx) => {
 bot.command('my_errands', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
+  
   try {
     const result = await pool.query(
       'SELECT t.*, u.first_name as executor_name FROM tasks t LEFT JOIN users u ON t.executor_id = u.id WHERE t.creator_id = $1 ORDER BY t.created_at DESC LIMIT 20',
       [user.id]
     );
+    
     if (result.rows.length === 0) {
       return ctx.reply('📭 Вы не создавали поручений');
     }
+    
     let message = '📝 Ваши поручения (как создатель):\n\n';
+    const keyboard = [];
+    
     result.rows.forEach((t, i) => {
       const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
       message += (i+1) + '. ' + emoji + ' ' + t.title + '\n';
       message += '   👤 ' + safeString(t.executor_name) + '\n';
       message += '   📅 До: ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
       message += '   📌 ' + t.status + '\n\n';
+      
+      // Добавляем кнопку отмены для каждой задачи (если ещё не выполнена)
+      if (t.status !== 'completed' && t.status !== 'declined') {
+        keyboard.push([
+          { text: '❌ Отменить поручение', callback_data: 'task_cancel_from_list_' + t.id }
+        ]);
+      }
     });
-    ctx.reply(message);
+    
+    ctx.reply(message, {
+      reply_markup: {
+        inline_keyboard: keyboard
+      }
+    });
   } catch (e) {
     console.error('my_errands error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
@@ -1145,6 +1178,75 @@ bot.action(/^clarify_cancel_(\d+)/, async (ctx) => {
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('clarify_cancel error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
+  // ========== БЫСТРОЕ ВЫПОЛНЕНИЕ ИЗ СПИСКА ==========
+bot.action(/^task_complete_from_list_(\d+)/, async (ctx) => {
+  try {
+    const taskId = parseInt(ctx.match[1]);
+    
+    // Проверяем что задача принадлежит пользователю
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    if (task.rows.length === 0) {
+      return ctx.answerCbQuery('❌ Задача не найдена');
+    }
+    
+    // Сохраняем состояние для получения файла
+    userStates[ctx.from.id] = {
+      step: 'task_receipt_file',
+      task_id: taskId
+    };
+    
+    await ctx.editMessageText('✅ Задача #' + taskId + ' выбрана для выполнения!\n\n📎 *Прикрепите документ о выполнении*\n\nОтправьте файл (PDF, фото, документ) или напишите "нет" чтобы пропустить', {
+      parse_mode: 'Markdown'
+    });
+    await ctx.answerCbQuery();
+  } catch (e) {
+    console.error('task_complete_from_list error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+// ========== БЫСТРОЕ ОТКЛОНЕНИЕ ИЗ СПИСКА ==========
+bot.action(/^task_decline_from_list_(\d+)/, async (ctx) => {
+  try {
+    const taskId = parseInt(ctx.match[1]);
+    
+    await pool.query('UPDATE tasks SET status = \'declined\' WHERE id = $1', [taskId]);
+    
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].creator_id]);
+    
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+      await sendNotification(creator.rows[0].telegram_id, '❌ Задача #' + taskId + ' отклонена\n\n📋 ' + task.rows[0].title + '\n👤 Исполнитель отклонил задачу');
+    }
+    
+    await ctx.editMessageText('❌ Задача #' + taskId + ' отклонена\n\n📋 ' + task.rows[0].title);
+    await ctx.answerCbQuery('✅ Задача отклонена');
+  } catch (e) {
+    console.error('task_decline_from_list error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+// ========== БЫСТРАЯ ОТМЕНА ПОРУЧЕНИЯ ИЗ СПИСКА ==========
+bot.action(/^task_cancel_from_list_(\d+)/, async (ctx) => {
+  try {
+    const taskId = parseInt(ctx.match[1]);
+    
+    await pool.query('UPDATE tasks SET status = \'cancelled\' WHERE id = $1', [taskId]);
+    
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    const executor = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].executor_id]);
+    
+    if (executor.rows.length > 0 && executor.rows[0].telegram_id) {
+      await sendNotification(executor.rows[0].telegram_id, '❌ Поручение #' + taskId + ' отменено\n\n📋 ' + task.rows[0].title + '\n👤 Создатель отменил задачу');
+    }
+    
+    await ctx.editMessageText('❌ Поручение #' + taskId + ' отменено\n\n📋 ' + task.rows[0].title);
+    await ctx.answerCbQuery('✅ Поручение отменено');
+  } catch (e) {
+    console.error('task_cancel_from_list error:', e);
     ctx.answerCbQuery('Ошибка');
   }
 });
