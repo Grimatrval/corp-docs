@@ -167,6 +167,7 @@ bot.command('adduser', async (ctx) => {
     const username = args[1].replace('@', '');
     const firstName = args[2];
     const lastName = args[3];
+    
     try {
       const chat = await bot.telegram.getChat('@' + username);
       const telegramId = chat.id.toString();
@@ -665,6 +666,22 @@ bot.on('voice', async (ctx) => {
   const state = userStates[ctx.from.id];
   if (state?.step === 'approval_file') {
     userStates[ctx.from.id] = { ...state, file_id: fileId, file_type: 'voice', step: 'approval_approver_list' };
+    return showApproverList(ctx, userStates[ctx.from.id]);
+  }
+});
+
+bot.on('video_note', async (ctx) => {
+  const user = await checkAccess(ctx);
+  if (!user) return;
+  const caption = ctx.message.caption || '';
+  const fileId = ctx.message.video_note.file_id;
+  if (caption.toLowerCase().includes('согласование:') || caption.toLowerCase().includes('согласуй:')) {
+    await createApprovalFromFile(ctx, caption, fileId, 'video.mp4', 'video_note');
+    return;
+  }
+  const state = userStates[ctx.from.id];
+  if (state?.step === 'approval_file') {
+    userStates[ctx.from.id] = { ...state, file_id: fileId, file_type: 'video_note', step: 'approval_approver_list' };
     return showApproverList(ctx, userStates[ctx.from.id]);
   }
 });
