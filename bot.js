@@ -487,6 +487,7 @@ bot.command('my_tasks', async (ctx) => {
   if (!user) return;
   
   try {
+    // Показываем только задачи со статусом 'in_progress'
     const result = await pool.query(
       'SELECT t.*, u.first_name as creator_name FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE t.executor_id = $1 AND t.status = \'in_progress\' ORDER BY t.deadline ASC',
       [user.id]
@@ -506,7 +507,7 @@ bot.command('my_tasks', async (ctx) => {
       message += `   📌 ${t.status}\n`;
       message += `   👤 ${safeString(t.creator_name)}\n\n`;
       
-      // Кнопки для каждой задачи
+      // Добавляем кнопки для каждой задачи
       keyboard.push([
         { text: `✅ #${i + 1}`, callback_data: `task_complete_from_list_${t.id}` },
         { text: `❌ #${i + 1}`, callback_data: `task_decline_from_list_${t.id}` }
@@ -523,51 +524,6 @@ bot.command('my_tasks', async (ctx) => {
     ctx.reply('❌ Ошибка: ' + e.message);
   }
 });
-
-    await showTaskPage(ctx, 0);
-    
-  } catch (e) {
-    console.error('my_tasks error:', e);
-    ctx.reply('❌ Ошибка: ' + e.message);
-  }
-});
-
-// Функция показа страницы задач
-async function showTaskPage(ctx, page) {
-  const state = userStates[ctx.from.id];
-  if (!state || !state.tasks) return;
-  
-  const task = state.tasks[page];
-  const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[task.priority] || '⚪';
-  
-  const message = `📋 Задача ${page + 1} из ${state.tasks.length}\n\n` +
-    `${emoji} ${task.title}\n` +
-    `📅 До: ${new Date(task.deadline).toLocaleDateString('ru-RU')}\n` +
-    `📌 ${task.status}\n` +
-    `👤 ${safeString(task.creator_name)}\n\n` +
-    `📝 ${task.description || 'Без описания'}`;
-  
-  // Кнопки действий + навигация
-  const keyboard = [];
-  
-  // Кнопки действий для текущей задачи
-  keyboard.push([
-    { text: '✅ Выполнить', callback_data: `task_complete_from_list_${task.id}` },
-    { text: '❌ Отклонить', callback_data: `task_decline_from_list_${task.id}` }
-  ]);
-  
-  // Кнопки навигации
-  const navRow = [];
-  if (page > 0) navRow.push({ text: '⬅️', callback_data: `tasks_page_${page - 1}` });
-  navRow.push({ text: `📄 ${page + 1}/${state.tasks.length}`, callback_data: 'noop' });
-  if (page < state.tasks.length - 1) navRow.push({ text: '➡️', callback_data: `tasks_page_${page + 1}` });
-  keyboard.push(navRow);
-  
-  await ctx.reply(message, {
-    reply_markup: { inline_keyboard: keyboard }
-  });
-}
-
 bot.command('my_errands', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
