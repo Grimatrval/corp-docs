@@ -561,35 +561,57 @@ bot.command('my_errands', async (ctx) => {
       return ctx.reply('📭 Вы не создавали поручений');
     }
     
-    let message = '📝 Ваши поручения (как создатель):\n\n';
-    const keyboard = [];
+    // Сохраняем задачи и текущую страницу в состоянии
+    userStates[ctx.from.id] = {
+      step: 'my_errands_list',
+      tasks: result.rows,
+      page: 0
+    };
     
-    result.rows.forEach((t, i) => {
-      const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
-      message += (i+1) + '. ' + emoji + ' ' + t.title + '\n';
-      message += '   👤 ' + safeString(t.executor_name) + '\n';
-      message += '   📅 До: ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
-      message += '   📌 ' + t.status + '\n\n';
-      
-      // Добавляем кнопку отмены для каждой задачи (если ещё не выполнена)
-      if (t.status !== 'completed' && t.status !== 'declined') {
-        keyboard.push([
-          { text: '❌ Отменить поручение', callback_data: 'task_cancel_from_list_' + t.id }
-        ]);
-      }
-    });
+    await showErrandPage(ctx, 0);
     
-    ctx.reply(message, {
-      reply_markup: {
-        inline_keyboard: keyboard
-      }
-    });
   } catch (e) {
     console.error('my_errands error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
   }
 });
 
+// Функция показа страницы поручений
+async function showErrandPage(ctx, page) {
+  const state = userStates[ctx.from.id];
+  if (!state || !state.tasks) return;
+  
+  const task = state.tasks[page];
+  const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[task.priority] || '⚪';
+  
+  const message = `📝 Поручение ${page + 1} из ${state.tasks.length}\n\n` +
+    `${emoji} ${task.title}\n` +
+    `👤 ${safeString(task.executor_name)}\n` +
+    `📅 До: ${new Date(task.deadline).toLocaleDateString('ru-RU')}\n` +
+    `📌 ${task.status}\n\n` +
+    `📝 ${task.description || 'Без описания'}`;
+  
+  // Кнопки действий + навигация
+  const keyboard = [];
+  
+  // Кнопка отмены (только если задача ещё активна)
+  if (task.status !== 'completed' && task.status !== 'declined') {
+    keyboard.push([
+      { text: '❌ Отменить поручение', callback_data: `task_cancel_from_list_${task.id}` }
+    ]);
+  }
+  
+  // Кнопки навигации
+  const navRow = [];
+  if (page > 0) navRow.push({ text: '⬅️', callback_data: `errands_page_${page - 1}` });
+  navRow.push({ text: `📄 ${page + 1}/${state.tasks.length}`, callback_data: 'noop' });
+  if (page < state.tasks.length - 1) navRow.push({ text: '➡️', callback_data: `errands_page_${page + 1}` });
+  keyboard.push(navRow);
+  
+  await ctx.reply(message, {
+    reply_markup: { inline_keyboard: keyboard }
+  });
+}
 // ========== ОБРАБОТКА ТЕКСТА ==========
 
 bot.on('text', async (ctx) => {
@@ -1280,6 +1302,109 @@ bot.action(/^cancel$/, async (ctx) => {
   delete userStates[ctx.from.id];
   await ctx.reply('❌ Отменено', { reply_markup: Markup.removeKeyboard() });
   await ctx.answerCbQuery();
+});
+
+// ========== НАВИГАЦИЯ ПО СПИСКУ ЗАДАЧ ==========
+bot.action(/^tasks_page_(\d+)/, async (ctx) => {
+  try {
+    const page = parseInt(ctx.match[1]);
+    const state = userStates[ctx.from.id];
+    
+    if (!state || !state.tasks || page < 0 || page >= state.tasks.length) {
+      return ctx.answerCbQuery('❌ Страница не найдена');
+    }
+    
+    state.page = page;
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+    await showTaskPage(ctx, page);
+    await ctx.answerCbQuery();
+  } catch (e) {
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+bot.action(/^errands_page_(\d+)/, async (ctx) => {
+  try {
+    const page = parseInt(ctx.match[1]);
+    const state = userStates[ctx.from.id];
+    
+    if (!state || !state.tasks || page < 0 || page >= state.tasks.length) {
+      return ctx.answerCbQuery('❌ Страница не найдена');
+    }
+    
+    state.page = page;
+    await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
+    await showErrandPage(ctx, page);
+    await ctx.answerCbQuery();
+  } catch (e) {
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+// ========== БЫСТРОЕ ВЫПОЛНЕНИЕ ИЗ СПИСКА ==========
+bot.action(/^task_complete_from_list_(\d+)/, async (ctx) => {
+  try {
+    const taskId = parseInt(ctx.match[1]);
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    
+    if (task.rows.length === 0) {
+      return ctx.answerCbQuery('❌ Задача не найдена');
+    }
+    
+    userStates[ctx.from.id] = { step: 'task_receipt_file', task_id: taskId };
+    
+    await ctx.editMessageText('✅ Задача #' + taskId + ' выбрана для выполнения!\n\n📎 *Прикрепите документ о выполнении*\n\nОтправьте файл (PDF, фото, документ) или напишите "нет" чтобы пропустить', {
+      parse_mode: 'Markdown'
+    });
+    await ctx.answerCbQuery();
+  } catch (e) {
+    console.error('task_complete_from_list error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+// ========== БЫСТРОЕ ОТКЛОНЕНИЕ ИЗ СПИСКА ==========
+bot.action(/^task_decline_from_list_(\d+)/, async (ctx) => {
+  try {
+    const taskId = parseInt(ctx.match[1]);
+    
+    await pool.query('UPDATE tasks SET status = \'declined\' WHERE id = $1', [taskId]);
+    
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].creator_id]);
+    
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+      await sendNotification(creator.rows[0].telegram_id, '❌ Задача #' + taskId + ' отклонена\n\n📋 ' + task.rows[0].title + '\n👤 Исполнитель отклонил задачу');
+    }
+    
+    await ctx.editMessageText('❌ Задача #' + taskId + ' отклонена\n\n📋 ' + task.rows[0].title);
+    await ctx.answerCbQuery('✅ Задача отклонена');
+  } catch (e) {
+    console.error('task_decline_from_list error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
+});
+
+// ========== БЫСТРАЯ ОТМЕНА ПОРУЧЕНИЯ ИЗ СПИСКА ==========
+bot.action(/^task_cancel_from_list_(\d+)/, async (ctx) => {
+  try {
+    const taskId = parseInt(ctx.match[1]);
+    
+    await pool.query('UPDATE tasks SET status = \'cancelled\' WHERE id = $1', [taskId]);
+    
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    const executor = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].executor_id]);
+    
+    if (executor.rows.length > 0 && executor.rows[0].telegram_id) {
+      await sendNotification(executor.rows[0].telegram_id, '❌ Поручение #' + taskId + ' отменено\n\n📋 ' + task.rows[0].title + '\n👤 Создатель отменил задачу');
+    }
+    
+    await ctx.editMessageText('❌ Поручение #' + taskId + ' отменено\n\n📋 ' + task.rows[0].title);
+    await ctx.answerCbQuery('✅ Поручение отменено');
+  } catch (e) {
+    console.error('task_cancel_from_list error:', e);
+    ctx.answerCbQuery('Ошибка');
+  }
 });
 
 // ========== ЗАПУСК ==========
