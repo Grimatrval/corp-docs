@@ -1,7 +1,6 @@
 require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const { Pool } = require('pg');
-const cron = require('node-cron');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -89,163 +88,6 @@ async function sendPaymentCompleteNotification(approvalId, withReceipt, fileId =
     return false;
   }
 }
-
-async function sendTaskCompletionNotification(taskId, withDocument, fileId, fileType, executorName) {
-  try {
-    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
-    if (task.rows.length === 0) return;
-    
-    const creatorId = task.rows[0].creator_id;
-    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [creatorId]);
-    
-    const createdAt = new Date(task.rows[0].created_at);
-    const completedAt = new Date();
-    const timeDiff = Math.abs(completedAt - createdAt);
-    
-    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
-    
-    let timeText = '';
-    if (days > 0) timeText += days + ' дн. ';
-    if (hours > 0) timeText += hours + ' ч. ';
-    timeText += minutes + ' мин.';
-    
-    let messageText = '✅ Поручение #' + taskId + ' выполнено!\n\n' +
-      '📋 ' + task.rows[0].title + '\n' +
-      '⏱ Время выполнения: ' + timeText + '\n' +
-      '👤 Исполнитель: ' + executorName;
-    
-    if (withDocument) {
-      messageText += '\n📎 Документ прикреплён';
-    }
-    
-    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
-      if (withDocument && fileId) {
-        if (fileType === 'photo') {
-          await bot.telegram.sendPhoto(creator.rows[0].telegram_id, fileId, { caption: messageText });
-        } else {
-          await bot.telegram.sendDocument(creator.rows[0].telegram_id, fileId, { caption: messageText });
-        }
-      } else {
-        await bot.telegram.sendMessage(creator.rows[0].telegram_id, messageText);
-      }
-    }
-    
-    console.log('✅ Task completion notification sent for task #' + taskId);
-    return true;
-  } catch (e) {
-    console.error('sendTaskCompletionNotification error:', e);
-    return false;
-  }
-}
-
-// ========== СИСТЕМА УВЕДОМЛЕНИЙ О СРОКАХ ==========
-
-cron.schedule('0 10 * * *', () => {
-  console.log('🔔 Running deadline check (10:00 MSK)...');
-  checkTaskDeadlines();
-}, {
-  timezone: 'Europe/Moscow'
-});
-
-cron.schedule('0 17 * * *', () => {
-  console.log('🔔 Running deadline check (17:00 MSK)...');
-  checkTaskDeadlines();
-}, {
-  timezone: 'Europe/Moscow'
-});
-
-async function checkTaskDeadlines() {
-  try {
-    const now = new Date();
-    const tasks = await pool.query(`
-      SELECT t.*, 
-             u_creator.telegram_id as creator_telegram_id,
-             u_creator.first_name as creator_name,
-             u_executor.telegram_id as executor_telegram_id,
-             u_executor.first_name as executor_name
-      FROM tasks t
-      LEFT JOIN users u_creator ON t.creator_id = u_creator.id
-      LEFT JOIN users u_executor ON t.executor_id = u_executor.id
-      WHERE t.status != 'completed' 
-        AND t.status != 'declined'
-      ORDER BY t.deadline ASC
-    `);
-    
-    if (tasks.rows.length === 0) {
-      console.log('✅ No active tasks to check');
-      return;
-    }
-    
-    console.log(`📋 Found ${tasks.rows.length} active tasks`);
-    
-    for (const task of tasks.rows) {
-      if (!task.deadline) continue;
-      
-      const deadline = new Date(task.deadline);
-      const daysLeft = Math.ceil((deadline - now) / (1000 * 60 * 60 * 24));
-      
-      let notificationText = '';
-      let shouldNotify = false;
-      
-      if (daysLeft < 0) {
-        notificationText = `⚠️ ПРОСРОЧЕНО поручение #${task.id}\n\n` +
-          `📋 ${task.title}\n` +
-          `📅 Срок был: ${deadline.toLocaleDateString('ru-RU')}\n` +
-          `⏰ Просрочено на: ${Math.abs(daysLeft)} дн.\n` +
-          `👤 Исполнитель: ${safeString(task.executor_name)}\n\n` +
-          `Пожалуйста, выполните задачу как можно скорее!`;
-        shouldNotify = true;
-      } else if (daysLeft === 0) {
-        notificationText = `⏰ СЕГОДНЯ срок поручения #${task.id}\n\n` +
-          `📋 ${task.title}\n` +
-          `📅 Срок: сегодня (${deadline.toLocaleDateString('ru-RU')})\n` +
-          `👤 Исполнитель: ${safeString(task.executor_name)}\n\n` +
-          `Не забудьте выполнить задачу сегодня!`;
-        shouldNotify = true;
-      } else if (daysLeft === 1) {
-        notificationText = `🔔 ЗАВТРА срок поручения #${task.id}\n\n` +
-          `📋 ${task.title}\n` +
-          `📅 Срок: завтра (${deadline.toLocaleDateString('ru-RU')})\n` +
-          `👤 Исполнитель: ${safeString(task.executor_name)}\n\n` +
-          `Остался 1 день!`;
-        shouldNotify = true;
-      } else if (daysLeft === 3) {
-        notificationText = `📌 Напоминание о поручении #${task.id}\n\n` +
-          `📋 ${task.title}\n` +
-          `📅 Срок: ${deadline.toLocaleDateString('ru-RU')}\n` +
-          `⏱ Осталось: 3 дня\n` +
-          `👤 Исполнитель: ${safeString(task.executor_name)}`;
-        shouldNotify = true;
-      }
-      
-      if (shouldNotify) {
-        if (task.creator_telegram_id) {
-          try {
-            await bot.telegram.sendMessage(task.creator_telegram_id, notificationText);
-            console.log(`✅ Notification sent to creator ${task.creator_telegram_id} for task #${task.id}`);
-          } catch (e) {
-            console.error(`❌ Failed to notify creator ${task.creator_telegram_id}:`, e.message);
-          }
-        }
-        
-        if (task.executor_telegram_id) {
-          try {
-            await bot.telegram.sendMessage(task.executor_telegram_id, notificationText);
-            console.log(`✅ Notification sent to executor ${task.executor_telegram_id} for task #${task.id}`);
-          } catch (e) {
-            console.error(`❌ Failed to notify executor ${task.executor_telegram_id}:`, e.message);
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.error('checkTaskDeadlines error:', e);
-  }
-}
-
-// ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 
 async function showApproverList(ctx, state) {
   try {
@@ -485,38 +327,29 @@ bot.command('new_task', async (ctx) => {
 bot.command('my_tasks', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
-  
   try {
     const result = await pool.query(
-      'SELECT t.*, u.first_name as creator_name FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE t.executor_id = $1 AND t.status != \'completed\' ORDER BY t.deadline ASC',
+      'SELECT t.*, u.first_name as creator_name FROM tasks t LEFT JOIN users u ON t.creator_id = u.id WHERE t.executor_id = $1 AND t.status = \'in_progress\' ORDER BY t.deadline ASC',
       [user.id]
     );
-    
     if (result.rows.length === 0) {
-      return ctx.reply('📭 У вас нет активных задач');
+      return ctx.reply('📭 У вас нет задач в работе');
     }
-    
-    let message = '📋 Ваши активные задачи:\n\n';
+    let message = '📋 Мои задачи в работе:\n\n';
     const keyboard = [];
-    
     result.rows.forEach((t, i) => {
       const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
       message += (i+1) + '. ' + emoji + ' ' + t.title + '\n';
       message += '   📅 До: ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
       message += '   📌 ' + t.status + '\n';
       message += '   👤 ' + safeString(t.creator_name) + '\n\n';
-      
-      // Добавляем кнопки для каждой задачи
       keyboard.push([
-        { text: '✅ Выполнено', callback_data: 'task_complete_from_list_' + t.id },
-        { text: '❌ Отклонить', callback_data: 'task_decline_from_list_' + t.id }
+        { text: '✅ #' + (i+1), callback_data: 'task_complete_from_list_' + t.id },
+        { text: '❌ #' + (i+1), callback_data: 'task_decline_from_list_' + t.id }
       ]);
     });
-    
     ctx.reply(message, {
-      reply_markup: {
-        inline_keyboard: keyboard
-      }
+      reply_markup: { inline_keyboard: keyboard }
     });
   } catch (e) {
     console.error('my_tasks error:', e);
@@ -527,40 +360,35 @@ bot.command('my_tasks', async (ctx) => {
 bot.command('my_errands', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
-  
   try {
     const result = await pool.query(
       'SELECT t.*, u.first_name as executor_name FROM tasks t LEFT JOIN users u ON t.executor_id = u.id WHERE t.creator_id = $1 ORDER BY t.created_at DESC LIMIT 20',
       [user.id]
     );
-    
     if (result.rows.length === 0) {
       return ctx.reply('📭 Вы не создавали поручений');
     }
-    
-    let message = '📝 Ваши поручения (как создатель):\n\n';
+    let message = '📝 Мои поручения:\n\n';
     const keyboard = [];
-    
     result.rows.forEach((t, i) => {
       const emoji = { low: '🟢', medium: '🟡', high: '🔴' }[t.priority] || '⚪';
       message += (i+1) + '. ' + emoji + ' ' + t.title + '\n';
       message += '   👤 ' + safeString(t.executor_name) + '\n';
       message += '   📅 До: ' + new Date(t.deadline).toLocaleDateString('ru-RU') + '\n';
       message += '   📌 ' + t.status + '\n\n';
-      
-      // Добавляем кнопку отмены для каждой задачи (если ещё не выполнена)
       if (t.status !== 'completed' && t.status !== 'declined') {
         keyboard.push([
-          { text: '❌ Отменить поручение', callback_data: 'task_cancel_from_list_' + t.id }
+          { text: '❌ Отменить #' + (i+1), callback_data: 'task_cancel_from_list_' + t.id }
         ]);
       }
     });
-    
-    ctx.reply(message, {
-      reply_markup: {
-        inline_keyboard: keyboard
-      }
-    });
+    if (keyboard.length > 0) {
+      ctx.reply(message, {
+        reply_markup: { inline_keyboard: keyboard }
+      });
+    } else {
+      ctx.reply(message);
+    }
   } catch (e) {
     console.error('my_errands error:', e);
     ctx.reply('❌ Ошибка: ' + e.message);
@@ -786,8 +614,12 @@ bot.on('text', async (ctx) => {
     if (state?.step === 'task_receipt_file') {
       const taskId = state.task_id;
       if (text.toLowerCase() === 'нет') {
+        await pool.query('UPDATE tasks SET status = \'completed\', completed_at = NOW() WHERE id = $1', [taskId]);
         const executorName = safeString(ctx.from.first_name);
-        await sendTaskCompletionNotification(taskId, false, null, null, executorName);
+        const creator = await pool.query('SELECT telegram_id FROM users WHERE id = (SELECT creator_id FROM tasks WHERE id = $1)', [taskId]);
+        if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+          await sendNotification(creator.rows[0].telegram_id, '✅ Задача #' + taskId + ' выполнена!\n\n👤 ' + executorName + ' завершил работу без документа');
+        }
         delete userStates[userId];
         return ctx.reply('✅ Спасибо за выполнение поручения!');
       }
@@ -811,8 +643,14 @@ bot.on('document', async (ctx) => {
     const taskId = state.task_id;
     const fileId = ctx.message.document.file_id;
     const fileType = 'document';
+    await pool.query('UPDATE tasks SET status = \'completed\', completed_at = NOW() WHERE id = $1', [taskId]);
     const executorName = safeString(ctx.from.first_name);
-    await sendTaskCompletionNotification(taskId, true, fileId, fileType, executorName);
+    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = (SELECT creator_id FROM tasks WHERE id = $1)', [taskId]);
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+      await bot.telegram.sendDocument(creator.rows[0].telegram_id, fileId, {
+        caption: '✅ Задача #' + taskId + ' выполнена!\n\n👤 ' + executorName + '\n📎 Документ прикреплён'
+      });
+    }
     delete userStates[ctx.from.id];
     return ctx.reply('✅ Спасибо за выполнение поручения! Документ прикреплён.');
   }
@@ -850,8 +688,14 @@ bot.on('photo', async (ctx) => {
     const taskId = state.task_id;
     const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
     const fileType = 'photo';
+    await pool.query('UPDATE tasks SET status = \'completed\', completed_at = NOW() WHERE id = $1', [taskId]);
     const executorName = safeString(ctx.from.first_name);
-    await sendTaskCompletionNotification(taskId, true, fileId, fileType, executorName);
+    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = (SELECT creator_id FROM tasks WHERE id = $1)', [taskId]);
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+      await bot.telegram.sendPhoto(creator.rows[0].telegram_id, fileId, {
+        caption: '✅ Задача #' + taskId + ' выполнена!\n\n👤 ' + executorName + '\n📎 Фото приложено'
+      });
+    }
     delete userStates[ctx.from.id];
     return ctx.reply('✅ Спасибо за выполнение поручения! Фото приложено.');
   }
@@ -933,9 +777,6 @@ bot.action(/^approver_(\d+)/, async (ctx) => {
             await bot.telegram.sendDocument(telegramId, state.file_id, { caption: messageText });
           } else if (state.file_type === 'voice') {
             await bot.telegram.sendVoice(telegramId, state.file_id, { caption: messageText });
-          } else if (state.file_type === 'video_note') {
-            await bot.telegram.sendVideoNote(telegramId, state.file_id);
-            await bot.telegram.sendMessage(telegramId, messageText);
           }
           await bot.telegram.sendMessage(telegramId, '📋 Выберите действие:', { reply_markup: inlineKeyboard });
         } else {
@@ -1180,25 +1021,12 @@ bot.action(/^clarify_cancel_(\d+)/, async (ctx) => {
     console.error('clarify_cancel error:', e);
     ctx.answerCbQuery('Ошибка');
   }
- });
+});
 
-  // ========== БЫСТРОЕ ВЫПОЛНЕНИЕ ИЗ СПИСКА ==========
 bot.action(/^task_complete_from_list_(\d+)/, async (ctx) => {
   try {
     const taskId = parseInt(ctx.match[1]);
-    
-    // Проверяем что задача принадлежит пользователю
-    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
-    if (task.rows.length === 0) {
-      return ctx.answerCbQuery('❌ Задача не найдена');
-    }
-    
-    // Сохраняем состояние для получения файла
-    userStates[ctx.from.id] = {
-      step: 'task_receipt_file',
-      task_id: taskId
-    };
-    
+    userStates[ctx.from.id] = { step: 'task_receipt_file', task_id: taskId };
     await ctx.editMessageText('✅ Задача #' + taskId + ' выбрана для выполнения!\n\n📎 *Прикрепите документ о выполнении*\n\nОтправьте файл (PDF, фото, документ) или напишите "нет" чтобы пропустить', {
       parse_mode: 'Markdown'
     });
@@ -1209,20 +1037,15 @@ bot.action(/^task_complete_from_list_(\d+)/, async (ctx) => {
   }
 });
 
-// ========== БЫСТРОЕ ОТКЛОНЕНИЕ ИЗ СПИСКА ==========
 bot.action(/^task_decline_from_list_(\d+)/, async (ctx) => {
   try {
     const taskId = parseInt(ctx.match[1]);
-    
     await pool.query('UPDATE tasks SET status = \'declined\' WHERE id = $1', [taskId]);
-    
     const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
     const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].creator_id]);
-    
     if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
       await sendNotification(creator.rows[0].telegram_id, '❌ Задача #' + taskId + ' отклонена\n\n📋 ' + task.rows[0].title + '\n👤 Исполнитель отклонил задачу');
     }
-    
     await ctx.editMessageText('❌ Задача #' + taskId + ' отклонена\n\n📋 ' + task.rows[0].title);
     await ctx.answerCbQuery('✅ Задача отклонена');
   } catch (e) {
@@ -1231,20 +1054,15 @@ bot.action(/^task_decline_from_list_(\d+)/, async (ctx) => {
   }
 });
 
-// ========== БЫСТРАЯ ОТМЕНА ПОРУЧЕНИЯ ИЗ СПИСКА ==========
 bot.action(/^task_cancel_from_list_(\d+)/, async (ctx) => {
   try {
     const taskId = parseInt(ctx.match[1]);
-    
     await pool.query('UPDATE tasks SET status = \'cancelled\' WHERE id = $1', [taskId]);
-    
     const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
     const executor = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].executor_id]);
-    
     if (executor.rows.length > 0 && executor.rows[0].telegram_id) {
       await sendNotification(executor.rows[0].telegram_id, '❌ Поручение #' + taskId + ' отменено\n\n📋 ' + task.rows[0].title + '\n👤 Создатель отменил задачу');
     }
-    
     await ctx.editMessageText('❌ Поручение #' + taskId + ' отменено\n\n📋 ' + task.rows[0].title);
     await ctx.answerCbQuery('✅ Поручение отменено');
   } catch (e) {
