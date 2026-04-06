@@ -206,7 +206,67 @@ async function sendPaymentCompleteNotification(approvalId, withReceipt, fileId =
     return false;
   }
 }
-
+async function finalizeTaskCompletion(taskId, withDocument, fileId, fileType, executorId) {
+  try {
+    // Обновляем задачу
+    await pool.query(
+      'UPDATE tasks SET status = \'completed\', completed_at = NOW() WHERE id = $1',
+      [taskId]
+    );
+    
+    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
+    if (task.rows.length === 0) return;
+    
+    const creatorId = task.rows[0].creator_id;
+    const creator = await pool.query('SELECT telegram_id, first_name FROM users WHERE id = $1', [creatorId]);
+    
+    // Рассчитываем время выполнения (СОХРАНЯЕМ!)
+    const createdAt = new Date(task.rows[0].created_at);
+    const completedAt = new Date();
+    const timeDiff = Math.abs(completedAt - createdAt);
+    
+    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
+    
+    let timeText = '';
+    if (days > 0) timeText += days + ' дн. ';
+    if (hours > 0) timeText += hours + ' ч. ';
+    timeText += minutes + ' мин.';
+    
+    let messageText = '✅ Поручение #' + taskId + ' выполнено!\n\n' +
+      '📋 ' + task.rows[0].title + '\n' +
+      '⏱ Время выполнения: ' + timeText + '\n' +
+      '👤 Исполнитель завершил работу';
+    
+    if (withDocument) {
+      messageText += '\n📎 Документ прикреплён';
+    }
+    
+    // Отправляем уведомление создателю
+    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
+      if (withDocument && fileId) {
+        if (fileType === 'photo') {
+          await bot.telegram.sendPhoto(creator.rows[0].telegram_id, fileId, {
+            caption: messageText
+          });
+        } else {
+          await bot.telegram.sendDocument(creator.rows[0].telegram_id, fileId, {
+            caption: messageText
+          });
+        }
+      } else {
+        await bot.telegram.sendMessage(creator.rows[0].telegram_id, messageText);
+      }
+    }
+    
+    console.log('✅ Task #' + taskId + ' completed notification sent');
+    return true;
+  } catch (e) {
+    console.error('finalizeTaskCompletion error:', e);
+    return false;
+  }
+}
 async function showApproverList(ctx, state) {
   try {
     const result = await pool.query('SELECT id, first_name, last_name, username FROM users WHERE is_active = true ORDER BY id');
@@ -718,7 +778,17 @@ bot.on('document', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
   const state = userStates[ctx.from.id];
-  
+    // ========== ОБРАБОТКА ФАЙЛА К ВЫПОЛНЕННОЙ ЗАДАЧЕ ==========
+  if (state?.step === 'task_receipt_file') {
+    const taskId = state.task_id;
+    const fileId = ctx.message.document.file_id;
+    const fileType = 'document';
+    
+    await finalizeTaskCompletion(taskId, true, fileId, fileType, ctx.from.id);
+    
+    delete userStates[ctx.from.id];
+    return ctx.reply('✅ Спасибо за выполнение поручения! Документ прикреплён.');
+  }
   // ========== ОБРАБОТКА ФАЙЛА ПЛАТЁЖНОГО ПОРУЧЕНИЯ ==========
   if (state?.step === 'payment_receipt_file') {
     const approvalId = state.approval_id;
@@ -746,7 +816,17 @@ bot.on('photo', async (ctx) => {
   const user = await checkAccess(ctx);
   if (!user) return;
   const state = userStates[ctx.from.id];
-  
+  // ========== ОБРАБОТКА ФОТО К ВЫПОЛНЕННОЙ ЗАДАЧЕ ==========
+  if (state?.step === 'task_receipt_file') {
+    const taskId = state.task_id;
+    const fileId = ctx.message.photo[ctx.message.photo.length - 1].file_id;
+    const fileType = 'photo';
+    
+    await finalizeTaskCompletion(taskId, true, fileId, fileType, ctx.from.id);
+    
+    delete userStates[ctx.from.id];
+    return ctx.reply('✅ Спасибо за выполнение поручения! Фото приложено.');
+  }
   // ========== ОБРАБОТКА ФОТО ПЛАТЁЖНОГО ПОРУЧЕНИЯ ==========
   if (state?.step === 'payment_receipt_file') {
     const approvalId = state.approval_id;
@@ -799,6 +879,20 @@ bot.on('video_note', async (ctx) => {
     userStates[ctx.from.id] = { ...state, file_id: fileId, file_type: 'video_note', step: 'approval_approver_list' };
     return showApproverList(ctx, userStates[ctx.from.id]);
   }
+  // ========== ОБРАБОТКА ОТВЕТА НА ПРИКРЕПЛЕНИЕ ФАЙЛА К ЗАДАЧЕ ==========
+if (state?.step === 'task_receipt_file') {
+  const taskId = state.task_id;
+  
+  // Если пользователь написал "нет"
+  if (text.toLowerCase() === 'нет') {
+    await finalizeTaskCompletion(taskId, false, null, null, userId);
+    delete userStates[userId];
+    return ctx.reply('✅ Спасибо за выполнение поручения!');
+  }
+  
+  // Иначе ждём файл (обработается в bot.on('document') или bot.on('photo'))
+  return;
+}
 });
 
 // ========== CALLBACK QUERY ==========
@@ -912,27 +1006,19 @@ bot.action(/^task_decline_(\d+)/, async (ctx) => {
     ctx.answerCbQuery('Ошибка');
   }
 });
-
 bot.action(/^task_completed_(\d+)/, async (ctx) => {
   try {
     const taskId = parseInt(ctx.match[1]);
-    await pool.query('UPDATE tasks SET status = \'completed\', completed_at = NOW() WHERE id = $1', [taskId]);
-    const task = await pool.query('SELECT * FROM tasks WHERE id = $1', [taskId]);
-    const creator = await pool.query('SELECT telegram_id FROM users WHERE id = $1', [task.rows[0].creator_id]);
-    const createdAt = new Date(task.rows[0].created_at);
-    const completedAt = new Date();
-    const timeDiff = Math.abs(completedAt - createdAt);
-    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24));
-    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60));
-    let timeText = '';
-    if (days > 0) timeText += days + ' дн. ';
-    if (hours > 0) timeText += hours + ' ч. ';
-    timeText += minutes + ' мин.';
-    if (creator.rows.length > 0 && creator.rows[0].telegram_id) {
-      await sendNotification(creator.rows[0].telegram_id, '✅ Задача #' + taskId + ' выполнена!\n\n📋 ' + task.rows[0].title + '\n⏱ Время выполнения: ' + timeText + '\n👤 Исполнитель завершил работу');
-    }
-    await ctx.editMessageText('✅ Задача #' + taskId + ' выполнена!\n\n📋 ' + task.rows[0].title + '\n⏱ Время: ' + timeText);
+    
+    // Сохраняем состояние для получения файла
+    userStates[ctx.from.id] = {
+      step: 'task_receipt_file',
+      task_id: taskId
+    };
+    
+    await ctx.editMessageText('✅ Задача #' + taskId + ' выполнена!\n\n📎 *Прикрепите документ о выполнении*\n\nОтправьте файл (PDF, фото, документ) или напишите "нет" чтобы пропустить', {
+      parse_mode: 'Markdown'
+    });
     await ctx.answerCbQuery();
   } catch (e) {
     console.error('task_completed error:', e);
